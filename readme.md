@@ -435,4 +435,4 @@ Unauthorized copying, distribution, or use is strictly prohibited.
 
 **Built with ❤️ for Etsy sellers worldwide**
 
-*Last Updated: December 19, 2024*
+*Last Updated: December 19, 2025*
