@@ -475,9 +475,9 @@ col1, col2 = st.columns(2)
 with col1:
     st.markdown("""
         <div class="pricing-card">
-            <div class="pricing-title">Free Forever</div>
+            <div class="pricing-title">Free</div>
             <div class="pricing-price">$0</div>
-            <div class="pricing-period">Always free</div>
+            # <div class="pricing-period">now free</div>
             <ul class="pricing-features">
                 <li>✅ Finance Pro Dashboard</li>
                 <li>✅ Customer Intelligence Dashboard</li>
@@ -495,7 +495,7 @@ with col2:
         <div class="pricing-card premium">
             <span class="pricing-badge">Most Popular</span>
             <div class="pricing-title">Insights Premium</div>
-            <div class="pricing-price">$9</div>
+            <div class="pricing-price">$12</div>
             <div class="pricing-period">per month</div>
             <ul class="pricing-features">
                 <li>✅ Everything in Free</li>

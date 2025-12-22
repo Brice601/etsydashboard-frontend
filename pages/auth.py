@@ -161,10 +161,7 @@ def handle_signup(email: str, password: str, name: str):
     st.balloons()
     
     # Redirect to dashboard
-    st.markdown("""
-        <meta http-equiv="refresh" content="2;url=/Dashboard">
-    """, unsafe_allow_html=True)
-    st.info("🔄 Redirecting to your dashboard...")
+    st.switch_page("pages/Dashboard.py")
 
 def handle_login(email: str, password: str):
     """Handle user login"""
@@ -192,10 +189,7 @@ def handle_login(email: str, password: str):
     st.success("✅ Logged in successfully!")
     
     # Redirect to dashboard
-    st.markdown("""
-        <meta http-equiv="refresh" content="2;url=/Dashboard">
-    """, unsafe_allow_html=True)
-    st.info("🔄 Redirecting to your dashboard...")
+    st.switch_page("pages/Dashboard.py")
 
 # ==================== MAIN AUTH UI ====================
 

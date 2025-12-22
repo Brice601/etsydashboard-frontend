@@ -336,53 +336,53 @@ with col3:
     if st.button("🚀 Open SEO Analyzer", key="seo_btn", use_container_width=True):
         st.info("💡 This would open the SEO Analyzer dashboard (not implemented in this demo)")
 
-# ==================== FILE UPLOAD SECTION ====================
-st.markdown("---")
-st.markdown("## 📤 Upload New Data")
+# # ==================== FILE UPLOAD SECTION ====================
+# st.markdown("---")
+# st.markdown("## 📤 Upload New Data")
 
-st.markdown("""
-    <div style="background: #f8f9fa; padding: 2rem; border-radius: 15px; margin: 2rem 0;">
-        <h3 style="color: #2c3e50; margin-bottom: 1rem;">Upload Your Etsy CSV Files</h3>
-        <p style="color: #7f8c8d; margin-bottom: 1.5rem;">
-            Download your sales, orders, and listings data from Etsy Shop Manager and upload here 
-            for instant analysis across all 3 dashboards.
-        </p>
-    </div>
-""", unsafe_allow_html=True)
+# st.markdown("""
+#     <div style="background: #f8f9fa; padding: 2rem; border-radius: 15px; margin: 2rem 0;">
+#         <h3 style="color: #2c3e50; margin-bottom: 1rem;">Upload Your Etsy CSV Files</h3>
+#         <p style="color: #7f8c8d; margin-bottom: 1.5rem;">
+#             Download your sales, orders, and listings data from Etsy Shop Manager and upload here 
+#             for instant analysis across all 3 dashboards.
+#         </p>
+#     </div>
+# """, unsafe_allow_html=True)
 
-col1, col2, col3 = st.columns(3)
+# col1, col2, col3 = st.columns(3)
 
-with col1:
-    sales_file = st.file_uploader(
-        "📊 Sales CSV",
-        type=['csv'],
-        help="Download from Shop Manager > Orders > Download CSV"
-    )
+# with col1:
+#     sales_file = st.file_uploader(
+#         "📊 Sales CSV",
+#         type=['csv'],
+#         help="Download from Shop Manager > Orders > Download CSV"
+#     )
 
-with col2:
-    orders_file = st.file_uploader(
-        "📦 Orders CSV",
-        type=['csv'],
-        help="Download from Shop Manager > Orders"
-    )
+# with col2:
+#     orders_file = st.file_uploader(
+#         "📦 Orders CSV",
+#         type=['csv'],
+#         help="Download from Shop Manager > Orders"
+#     )
 
-with col3:
-    listings_file = st.file_uploader(
-        "📝 Listings CSV",
-        type=['csv'],
-        help="Download from Shop Manager > Listings"
-    )
+# with col3:
+#     listings_file = st.file_uploader(
+#         "📝 Listings CSV",
+#         type=['csv'],
+#         help="Download from Shop Manager > Listings"
+#     )
 
-if st.button("🔍 Analyze Data", type="primary", use_container_width=True):
-    if sales_file and orders_file and listings_file:
-        with st.spinner("Analyzing your data..."):
-            # Simulate analysis
-            import time
-            time.sleep(2)
-            st.success("✅ Analysis complete! Check your dashboards for insights.")
-            st.balloons()
-    else:
-        st.warning("⚠️ Please upload all 3 CSV files to proceed")
+# if st.button("🔍 Analyze Data", type="primary", use_container_width=True):
+#     if sales_file and orders_file and listings_file:
+#         with st.spinner("Analyzing your data..."):
+#             # Simulate analysis
+#             import time
+#             time.sleep(2)
+#             st.success("✅ Analysis complete! Check your dashboards for insights.")
+#             st.balloons()
+#     else:
+#         st.warning("⚠️ Please upload all 3 CSV files to proceed")
 
 # ==================== PREMIUM UPSELL ====================
 if not is_premium:
