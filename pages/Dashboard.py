@@ -292,7 +292,7 @@ with col1:
     
     # Button to Finance dashboard (would link to actual dashboard page)
     if st.button("🚀 Open Finance Pro", key="finance_btn", use_container_width=True):
-        st.info("💡 This would open the Finance Pro dashboard (not implemented in this demo)")
+        st.switch_page("pages/etsy_finance_pro.py")
 
 with col2:
     st.markdown("""
@@ -313,7 +313,7 @@ with col2:
     """, unsafe_allow_html=True)
     
     if st.button("🚀 Open Customer Intelligence", key="customer_btn", use_container_width=True):
-        st.info("💡 This would open the Customer Intelligence dashboard (not implemented in this demo)")
+        st.switch_page("pages/etsy_customer_intelligence.py")
 
 with col3:
     st.markdown("""
@@ -334,7 +334,7 @@ with col3:
     """, unsafe_allow_html=True)
     
     if st.button("🚀 Open SEO Analyzer", key="seo_btn", use_container_width=True):
-        st.info("💡 This would open the SEO Analyzer dashboard (not implemented in this demo)")
+        st.switch_page("pages/etsy_seo_analyzer.py")
 
 # # ==================== FILE UPLOAD SECTION ====================
 # st.markdown("---")
@@ -404,7 +404,7 @@ if not is_premium:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         if st.button("🚀 Upgrade to Premium", type="primary", use_container_width=True):
-            st.switch_page("pages/2_✨_Premium.py")
+            st.switch_page("pages/Premium.py")
 
 # ==================== RECENT ACTIVITY ====================
 st.markdown("---")
