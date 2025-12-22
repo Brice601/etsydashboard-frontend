@@ -19,7 +19,7 @@ class APIClient:
             self.api_key = st.secrets["api"]["api_key"]
         except KeyError:
             # Fallback for development
-            self.base_url = "http://localhost:5000"
+            self.base_url = "http://localhost:8000"
             self.api_key = "dev-key"
         
         self.headers = {

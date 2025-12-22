@@ -5,6 +5,7 @@ Reusable functions for SEO optimization across all landing pages
 
 import streamlit as st
 from typing import Dict, List, Optional
+import json
 
 
 def render_seo_meta(
@@ -107,7 +108,7 @@ def render_schema_product(
         }
     
     st.markdown(
-        f'<script type="application/ld+json">{str(schema).replace("\'", "\"")}</script>',
+        f'<script type="application/ld+json">{json.dumps(schema)}</script>',
         unsafe_allow_html=True
     )
 
@@ -158,7 +159,7 @@ def render_schema_software(
         }
     
     st.markdown(
-        f'<script type="application/ld+json">{str(schema).replace("\'", "\"")}</script>',
+        f'<script type="application/ld+json">{json.dumps(schema)}</script>',
         unsafe_allow_html=True
     )
 
@@ -201,7 +202,7 @@ def render_schema_faq(faqs: List[Dict[str, str]]):
     }
     
     st.markdown(
-        f'<script type="application/ld+json">{str(schema).replace("\'", "\"")}</script>',
+        f'<script type="application/ld+json">{json.dumps(schema)}</script>',
         unsafe_allow_html=True
     )
 
@@ -245,7 +246,7 @@ def render_schema_howto(
     }
     
     st.markdown(
-        f'<script type="application/ld+json">{str(schema).replace("\'", "\"")}</script>',
+        f'<script type="application/ld+json">{json.dumps(schema)}</script>',
         unsafe_allow_html=True
     )
 
@@ -280,7 +281,7 @@ def render_breadcrumbs(items: List[Dict[str, str]]):
     }
     
     st.markdown(
-        f'<script type="application/ld+json">{str(schema).replace("\'", "\"")}</script>',
+        f'<script type="application/ld+json">{json.dumps(schema)}</script>',
         unsafe_allow_html=True
     )
 
