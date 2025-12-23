@@ -75,15 +75,46 @@ def load_and_prepare_orders(orders_df):
     
     # Column mapping
     column_mapping = {
-        'Sale Date': 'Date', 'Order Date': 'Date',
-        'Date de vente': 'Date', 'Date de commande': 'Date',
-        'Buyer': 'Buyer', 'Acheteur': 'Buyer',
-        'Ship Country': 'Country', 'Pays': 'Country',
-        'Ship City': 'City', 'Ville': 'City',
-        'Order Value': 'Total', 'Total': 'Total',
-        'Order ID': 'Order_ID', 'Commande': 'Order_ID',
-        'Date Paid': 'Date_Paid', 'Date payée': 'Date_Paid',
-        'Date Shipped': 'Date_Shipped', 'Date expédiée': 'Date_Shipped'
+        # Dates (EN + FR)
+        'Sale Date': 'Date', 
+        'Order Date': 'Date',
+        'Date de vente': 'Date', 
+        'Date de commande': 'Date',
+        
+        # Buyer (EN + FR)
+        'Buyer': 'Buyer', 
+        'Acheteur': 'Buyer',
+        
+        # Country (EN + FR)
+        'Ship Country': 'Country', 
+        'Pays de livraison': 'Country',
+        'Pays': 'Country',
+        
+        # City (EN + FR)
+        'Ship City': 'City', 
+        'Ville de livraison': 'City',
+        'Ville': 'City',
+        
+        # Total/Order Value (EN + FR)
+        'Order Value': 'Total',
+        'Order Total': 'Total',
+        'Total de la commande': 'Total',
+        'Item Total': 'Total',
+        'Total': 'Total',
+        
+        # Order ID (EN + FR)
+        'Order ID': 'Order_ID',
+        'Commande n°': 'Order_ID',
+        'Commande': 'Order_ID',
+        
+        # Date Paid (EN + FR)
+        'Date Paid': 'Date_Paid',
+        'Date payée': 'Date_Paid',
+        
+        # Date Shipped (EN + FR)
+        'Date Shipped': 'Date_Shipped',
+        "Date d'envoi": 'Date_Shipped',
+        'Date expédiée': 'Date_Shipped'
     }
     
     for old_col, new_col in column_mapping.items():

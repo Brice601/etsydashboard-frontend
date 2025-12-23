@@ -77,13 +77,40 @@ def load_and_prepare_listings(listings_df):
     
     # Column mapping
     column_mapping = {
-        'Title': 'Title', 'Titre': 'Title',
-        'Price': 'Price', 'Prix': 'Price',
-        'Quantity': 'Quantity', 'Stock': 'Quantity',
-        'Tags': 'Tags', 'Étiquettes': 'Tags',
+        # Title (EN + FR - MAJUSCULES incluses)
+        'Title': 'Title',
+        'Titre': 'Title',
+        'TITRE': 'Title',
+        
+        # Price (EN + FR - MAJUSCULES incluses)
+        'Price': 'Price',
+        'Prix': 'Price',
+        'PRIX': 'Price',
+        
+        # Quantity (EN + FR)
+        'Quantity': 'Quantity',
+        'Stock': 'Quantity',
+        'QUANTITÉ': 'Quantity',
+        'Quantité': 'Quantity',
+        
+        # Tags (EN + FR - MAJUSCULES incluses)
+        'Tags': 'Tags',
+        'Étiquettes': 'Tags',
+        'TAGS': 'Tags',
+        
+        # Description (EN + FR - MAJUSCULES incluses)
         'Description': 'Description',
-        'Images': 'Images', 'Photos': 'Images',
-        'SKU': 'SKU'
+        'DESCRIPTION': 'Description',
+        
+        # Images (EN + FR)
+        'Images': 'Images',
+        'Photos': 'Images',
+        
+        # SKU (EN + FR - MAJUSCULES incluses)
+        'SKU': 'SKU',
+        'RÉFÉRENCE': 'SKU',
+        'Référence': 'SKU',
+        'Reference': 'SKU'
     }
     
     for old_col, new_col in column_mapping.items():
