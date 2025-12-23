@@ -1,11 +1,14 @@
 """
-🔍 SEO Analyzer Dashboard v1.0
+🔍 SEO Analyzer Dashboard v2.0 - ENRICHED VERSION
 Optimize your Etsy listings to rank higher in search
 
 Features:
-✅ SEO score per listing (0-100)
-✅ Title optimization analysis
-✅ Tags performance tracking
+✅ SEO score per listing (0-100) with detailed breakdown
+✅ Title optimization analysis with keyword frequency
+✅ Tags performance tracking with sales correlation
+✅ Image analysis and correlation with sales
+✅ Variation performance analysis
+✅ SEO opportunities identification
 ✅ Correlation SEO score vs sales (Premium)
 ✅ Best-sellers vs non-sellers comparison (Premium)
 ✅ AI-powered recommendations (Premium)
@@ -72,45 +75,18 @@ def check_data_availability():
 
 @st.cache_data
 def load_and_prepare_listings(listings_df):
-    """Prepare listings data"""
+    """Prepare listings data with enhanced mapping"""
     df = listings_df.copy()
     
-    # Column mapping
+    # Column mapping (supports both EN and FR)
     column_mapping = {
-        # Title (EN + FR - MAJUSCULES incluses)
-        'Title': 'Title',
-        'Titre': 'Title',
-        'TITRE': 'Title',
-        
-        # Price (EN + FR - MAJUSCULES incluses)
-        'Price': 'Price',
-        'Prix': 'Price',
-        'PRIX': 'Price',
-        
-        # Quantity (EN + FR)
-        'Quantity': 'Quantity',
-        'Stock': 'Quantity',
-        'QUANTITÉ': 'Quantity',
-        'Quantité': 'Quantity',
-        
-        # Tags (EN + FR - MAJUSCULES incluses)
-        'Tags': 'Tags',
-        'Étiquettes': 'Tags',
-        'TAGS': 'Tags',
-        
-        # Description (EN + FR - MAJUSCULES incluses)
-        'Description': 'Description',
-        'DESCRIPTION': 'Description',
-        
-        # Images (EN + FR)
-        'Images': 'Images',
-        'Photos': 'Images',
-        
-        # SKU (EN + FR - MAJUSCULES incluses)
-        'SKU': 'SKU',
-        'RÉFÉRENCE': 'SKU',
-        'Référence': 'SKU',
-        'Reference': 'SKU'
+        'Title': 'Title', 'Titre': 'Title', 'TITRE': 'Title',
+        'Price': 'Price', 'Prix': 'Price', 'PRIX': 'Price',
+        'Quantity': 'Quantity', 'Stock': 'Quantity', 'QUANTITÉ': 'Quantity', 'Quantité': 'Quantity',
+        'Tags': 'Tags', 'Étiquettes': 'Tags', 'TAGS': 'Tags',
+        'Description': 'Description', 'DESCRIPTION': 'Description',
+        'Images': 'Images', 'Photos': 'Images',
+        'SKU': 'SKU', 'RÉFÉRENCE': 'SKU', 'Référence': 'SKU', 'Reference': 'SKU'
     }
     
     for old_col, new_col in column_mapping.items():
@@ -125,8 +101,13 @@ def load_and_prepare_listings(listings_df):
                           .str.strip())
         df['Price'] = pd.to_numeric(df['Price'], errors='coerce').fillna(0)
     
-    # Count images (simplified - assume column contains count or comma-separated URLs)
-    if 'Images' in df.columns:
+    # Count images from IMAGE columns
+    image_cols = [f'IMAGE {i}' for i in range(1, 11)]
+    available_image_cols = [col for col in image_cols if col in df.columns]
+    
+    if available_image_cols:
+        df['Num_Images'] = df[available_image_cols].notna().sum(axis=1)
+    elif 'Images' in df.columns:
         df['Num_Images'] = df['Images'].apply(lambda x: 
             len(str(x).split(',')) if pd.notna(x) and str(x) else 0
         )
@@ -139,232 +120,552 @@ def load_and_prepare_listings(listings_df):
     return df
 
 
-# ==================== SEO ANALYSIS FUNCTIONS ====================
+# ==================== ENHANCED SEO ANALYSIS FUNCTIONS ====================
 
-def calculate_title_seo_score(title):
-    """Calculate SEO score for a title (0-100)"""
+def calculate_enhanced_seo_score(row):
+    """
+    Enhanced SEO score calculation (0-100) with detailed breakdown
+    Combines both original and enriched scoring logic
+    """
     score = 0
     issues = []
     recommendations = []
+    details = {}
     
-    if pd.isna(title):
-        return 0, ["❌ Missing title"], ["Add a descriptive title"]
+    # ========== TITLE ANALYSIS (40 points) ==========
+    title = str(row.get('Title', ''))
+    if pd.isna(title) or not title:
+        return {
+            'score': 0,
+            'issues': ["❌ Missing title"],
+            'recommendations': ["Add a descriptive title"],
+            'details': {},
+            'grade': '❌ F'
+        }
     
-    title_str = str(title)
-    title_len = len(title_str)
+    title_len = len(title)
+    title_words = len(title.split())
     
-    # Optimal length (Etsy allows 140 chars)
+    # Length optimization (20 points)
     if 100 <= title_len <= 140:
-        score += 30
-    elif 80 <= title_len < 100:
         score += 20
+        details['title_length'] = '✅ Optimal length'
+    elif 80 <= title_len < 100:
+        score += 15
         recommendations.append("📏 Increase title length (optimal: 100-140 characters)")
+        details['title_length'] = '⚠️ Length to optimize'
     elif title_len < 80:
         score += 10
         issues.append("❌ Title too short")
         recommendations.append("📏 Extend title to 100-140 characters")
+        details['title_length'] = '❌ Too short'
     else:
         score += 15
         issues.append("⚠️ Title too long")
         recommendations.append("✂️ Reduce to max 140 characters")
+        details['title_length'] = '⚠️ Too long'
     
-    # Number of keywords (separated by commas)
-    keywords = [k.strip() for k in title_str.split(',') if k.strip()]
-    num_keywords = len(keywords)
-    
-    if num_keywords >= 3:
-        score += 25
-    elif num_keywords >= 2:
+    # Word count (20 points)
+    if 10 <= title_words <= 15:
+        score += 20
+        details['title_words'] = '✅ Good word count'
+    elif title_words >= 8:
         score += 15
-        recommendations.append("📝 Add more keywords separated by commas")
+        recommendations.append("📝 Aim for 10-15 words")
+        details['title_words'] = '⚠️ Word count to optimize'
     else:
         score += 5
-        issues.append("❌ Not enough keywords")
-        recommendations.append("📝 Use commas to separate keywords")
+        issues.append("❌ Not enough words")
+        recommendations.append("📝 Add more descriptive words (10-15 optimal)")
+        details['title_words'] = '❌ Too few words'
     
-    # Presence of important keywords (generic)
-    important_keywords = ['handmade', 'gift', 'vintage', 'custom', 'personalized',
-                         'unique', 'jewelry', 'art', 'home', 'decor', 'wedding']
+    # ========== TAGS ANALYSIS (30 points) ==========
+    tags = str(row.get('Tags', ''))
+    tags_list = [t.strip() for t in tags.split(',') if t.strip()] if tags else []
+    num_tags = len(tags_list)
     
-    title_lower = title_str.lower()
-    keywords_found = sum(1 for kw in important_keywords if kw in title_lower)
-    
-    if keywords_found >= 2:
-        score += 25
-    elif keywords_found >= 1:
+    # Tag count (20 points)
+    if num_tags == 13:
+        score += 20
+        details['tags_count'] = '✅ 13 tags (maximum)'
+    elif num_tags >= 10:
         score += 15
-        recommendations.append("🎯 Add more relevant keywords")
+        recommendations.append("🏷️ Add more tags (13 max)")
+        details['tags_count'] = '✅ 10+ tags'
+    elif num_tags >= 7:
+        score += 10
+        issues.append("⚠️ Less than 10 tags")
+        recommendations.append("🏷️ Use all 13 tag slots")
+        details['tags_count'] = '⚠️ Less than 10 tags'
     else:
         score += 5
-        issues.append("❌ Missing relevant keywords")
-        recommendations.append("🎯 Include keywords like 'handmade', 'gift', 'unique', etc.")
+        issues.append("❌ Not enough tags")
+        recommendations.append("🏷️ Add tags (13 recommended)")
+        details['tags_count'] = '❌ Too few tags'
     
-    # Special characters (emojis can help)
-    if any(char in title_str for char in ['✨', '💎', '🎁', '❤️', '⭐']):
+    # Tag quality (10 points)
+    quality_tags = [t for t in tags_list if len(t) > 3]
+    if len(quality_tags) == num_tags and num_tags > 0:
         score += 10
-    
-    # First letter capitalized
-    if title_str[0].isupper():
-        score += 10
+        details['tags_quality'] = '✅ All quality tags'
+    elif len(quality_tags) > 0:
+        score += 5
+        recommendations.append("🎯 Use longer, more specific tags")
+        details['tags_quality'] = '⚠️ Some short tags'
     else:
-        recommendations.append("🔤 Capitalize first letter")
+        details['tags_quality'] = '❌ Low quality tags'
     
-    return min(score, 100), issues, recommendations
-
-
-def analyze_tags(tags_str):
-    """Analyze tags from a listing"""
-    if pd.isna(tags_str):
-        return []
+    # ========== DESCRIPTION ANALYSIS (20 points) ==========
+    description = str(row.get('Description', ''))
+    desc_length = len(description)
     
-    # Split by comma or semicolon
-    tags = re.split(r'[,;]', str(tags_str))
-    tags = [tag.strip().lower() for tag in tags if tag.strip()]
+    if desc_length >= 1000:
+        score += 20
+        details['description'] = '✅ Complete description'
+    elif desc_length >= 500:
+        score += 15
+        recommendations.append("📄 Extend description (1000+ chars optimal)")
+        details['description'] = '✅ Good description'
+    elif desc_length >= 200:
+        score += 10
+        issues.append("⚠️ Short description")
+        recommendations.append("📄 Add more detail to description")
+        details['description'] = '⚠️ Short description'
+    else:
+        score += 5
+        issues.append("❌ Very short description")
+        recommendations.append("📄 Write detailed description (500+ chars)")
+        details['description'] = '❌ Too short'
     
-    return tags
-
-
-def get_seo_category(score):
-    """Return SEO category based on score"""
-    if score >= 80:
-        return "🟢 Excellent", "seo-score-high"
+    # ========== IMAGES ANALYSIS (10 points) ==========
+    num_images = int(row.get('Num_Images', 0))
+    
+    if num_images >= 10:
+        score += 10
+        details['images'] = '✅ 10 images (maximum)'
+    elif num_images >= 7:
+        score += 8
+        recommendations.append("📸 Add more images (10 max)")
+        details['images'] = '✅ 7+ images'
+    elif num_images >= 5:
+        score += 6
+        recommendations.append("📸 Add more images (aim for 10)")
+        details['images'] = '⚠️ 5-6 images'
+    elif num_images >= 3:
+        score += 4
+        issues.append("⚠️ Only 3-4 images")
+        recommendations.append("📸 Add significantly more images")
+        details['images'] = '⚠️ 3-4 images'
+    else:
+        score += 2
+        issues.append("❌ Very few images")
+        recommendations.append("📸 Add at least 5 images")
+        details['images'] = '❌ Too few images'
+    
+    # Determine grade
+    if score >= 90:
+        grade = '🏆 A+'
+    elif score >= 80:
+        grade = '🥇 A'
+    elif score >= 70:
+        grade = '🥈 B'
     elif score >= 60:
-        return "🟡 Good", "seo-score-medium"
-    elif score >= 40:
-        return "🟠 Average", "seo-score-medium"
+        grade = '🥉 C'
+    elif score >= 50:
+        grade = '⚠️ D'
     else:
-        return "🔴 Low", "seo-score-low"
+        grade = '❌ F'
+    
+    return {
+        'score': score,
+        'issues': issues,
+        'recommendations': recommendations[:5],  # Top 5 recommendations
+        'details': details,
+        'grade': grade
+    }
 
 
-def analyze_listing_performance(listings_df, sales_df):
-    """Cross listings with sales to identify performance"""
+# ==================== TITLE ANALYSIS ====================
+
+def analyze_titles(listings_df):
+    """Enhanced title analysis with keyword extraction"""
+    listings_df['title_length'] = listings_df['Title'].astype(str).str.len()
+    listings_df['title_words'] = listings_df['Title'].astype(str).str.split().str.len()
+    
+    analysis = {
+        'avg_length': listings_df['title_length'].mean(),
+        'avg_words': listings_df['title_words'].mean(),
+        'optimal_length': ((listings_df['title_length'] >= 100) & (listings_df['title_length'] <= 140)).sum(),
+        'optimal_words': ((listings_df['title_words'] >= 10) & (listings_df['title_words'] <= 15)).sum(),
+        'too_short': (listings_df['title_length'] < 80).sum(),
+        'too_long': (listings_df['title_length'] > 140).sum()
+    }
+    
+    # Extract frequent keywords
+    all_titles = ' '.join(listings_df['Title'].astype(str).str.lower()).split()
+    stopwords = ['de', 'le', 'la', 'les', 'un', 'une', 'et', 'pour', 'avec', 'en', 'du', 'des', 
+                 'the', 'a', 'an', 'and', 'for', 'with', 'in', 'of']
+    keywords = [word for word in all_titles if len(word) > 3 and word not in stopwords]
+    
+    keyword_freq = Counter(keywords).most_common(20)
+    analysis['top_keywords'] = keyword_freq
+    
+    return analysis
+
+
+def plot_title_length_analysis(title_analysis):
+    """Visualize title length distribution"""
+    categories = ['Too Short', 'Optimal', 'Too Long']
+    values = [
+        title_analysis['too_short'],
+        title_analysis['optimal_length'],
+        title_analysis['too_long']
+    ]
+    colors = ['#dc3545', '#28a745', '#ffc107']
+    
+    fig = go.Figure(data=[go.Bar(
+        x=categories,
+        y=values,
+        marker_color=colors,
+        text=values,
+        textposition='outside'
+    )])
+    
+    fig.update_layout(
+        title='Title Length Distribution',
+        xaxis_title='Category',
+        yaxis_title='Number of Listings',
+        height=400
+    )
+    
+    return fig
+
+
+# ==================== TAG ANALYSIS ====================
+
+def analyze_tags(listings_df):
+    """Comprehensive tag analysis"""
+    # Extract all tags
+    all_tags = []
+    for tags_str in listings_df['Tags']:
+        if pd.notna(tags_str):
+            tags = [t.strip() for t in str(tags_str).split(',')]
+            all_tags.extend([t for t in tags if t])
+    
+    # Tag frequency
+    tag_freq = Counter(all_tags).most_common(30)
+    
+    # Stats per listing
+    listings_df['nb_tags'] = listings_df['Tags'].apply(
+        lambda x: len([t for t in str(x).split(',') if t.strip()]) if pd.notna(x) else 0
+    )
+    
+    analysis = {
+        'avg_tags_per_listing': listings_df['nb_tags'].mean(),
+        'max_tags_listings': (listings_df['nb_tags'] == 13).sum(),
+        'under_10_tags': (listings_df['nb_tags'] < 10).sum(),
+        'top_tags': tag_freq,
+        'total_unique_tags': len(set(all_tags))
+    }
+    
+    return analysis
+
+
+def analyze_tag_performance(listings_df, sales_df):
+    """Correlate tags with sales performance"""
+    if sales_df is None or len(sales_df) == 0:
+        return None
+    
+    # Match column names
+    item_name_col = 'Item Name' if 'Item Name' in sales_df.columns else 'TITRE'
+    
+    # Merge listings with sales
+    merged = listings_df.merge(
+        sales_df.groupby(item_name_col)['Quantity'].sum(),
+        left_on='Title',
+        right_index=True,
+        how='left'
+    )
+    
+    merged['Quantity'] = merged['Quantity'].fillna(0)
+    
+    # Calculate average sales per tag
+    tag_sales = {}
+    for _, row in merged.iterrows():
+        if pd.notna(row['Tags']):
+            tags = [t.strip() for t in str(row['Tags']).split(',')]
+            for tag in tags:
+                if tag:
+                    if tag not in tag_sales:
+                        tag_sales[tag] = []
+                    tag_sales[tag].append(row['Quantity'])
+    
+    # Average sales per tag
+    tag_performance = {
+        tag: np.mean(sales) 
+        for tag, sales in tag_sales.items() 
+        if len(sales) >= 2  # At least 2 occurrences
+    }
+    
+    # Top performing tags
+    top_performing_tags = sorted(tag_performance.items(), key=lambda x: x[1], reverse=True)[:15]
+    
+    return top_performing_tags
+
+
+def plot_tag_frequency(tag_analysis):
+    """Visualize most used tags"""
+    tags_df = pd.DataFrame(tag_analysis['top_tags'][:15], columns=['Tag', 'Frequency'])
+    
+    fig = px.bar(
+        tags_df,
+        x='Frequency',
+        y='Tag',
+        orientation='h',
+        title='Top 15 Most Used Tags',
+        color='Frequency',
+        color_continuous_scale='Blues'
+    )
+    
+    fig.update_layout(height=500, showlegend=False)
+    return fig
+
+
+def plot_tag_performance(tag_performance):
+    """Visualize best performing tags"""
+    perf_df = pd.DataFrame(tag_performance, columns=['Tag', 'Avg Sales'])
+    
+    fig = px.bar(
+        perf_df,
+        x='Avg Sales',
+        y='Tag',
+        orientation='h',
+        title='Top 15 Best Performing Tags',
+        color='Avg Sales',
+        color_continuous_scale='Greens'
+    )
+    
+    fig.update_layout(height=500, showlegend=False)
+    return fig
+
+
+# ==================== IMAGE ANALYSIS ====================
+
+def analyze_images(listings_df):
+    """Analyze image usage"""
+    analysis = {
+        'avg_images': listings_df['Num_Images'].mean(),
+        'max_images_listings': (listings_df['Num_Images'] == 10).sum(),
+        'under_5_images': (listings_df['Num_Images'] < 5).sum()
+    }
+    
+    return analysis
+
+
+def correlate_images_to_sales(listings_df, sales_df):
+    """Correlate number of images with sales"""
     if sales_df is None:
         return None
     
-    # Map column names
-    product_col = 'Item Name' if 'Item Name' in sales_df.columns else 'Product'
+    item_name_col = 'Item Name' if 'Item Name' in sales_df.columns else 'TITRE'
     
-    if product_col not in sales_df.columns:
+    merged = listings_df.merge(
+        sales_df.groupby(item_name_col)['Quantity'].sum(),
+        left_on='Title',
+        right_index=True,
+        how='left'
+    )
+    
+    merged['Quantity'] = merged['Quantity'].fillna(0)
+    
+    image_corr = merged.groupby('Num_Images')['Quantity'].agg(['sum', 'mean', 'count']).reset_index()
+    image_corr.columns = ['Images', 'Total_Sales', 'Avg_Sales', 'Listings']
+    
+    return image_corr
+
+
+def plot_image_correlation(image_corr):
+    """Visualize image-sales correlation"""
+    fig = go.Figure()
+    
+    fig.add_trace(go.Bar(
+        x=image_corr['Images'],
+        y=image_corr['Total_Sales'],
+        name='Total Sales',
+        marker_color='lightblue'
+    ))
+    
+    fig.add_trace(go.Scatter(
+        x=image_corr['Images'],
+        y=image_corr['Avg_Sales'],
+        name='Avg Sales',
+        yaxis='y2',
+        marker_color='orange',
+        mode='lines+markers'
+    ))
+    
+    fig.update_layout(
+        title='Sales Correlation with Number of Images',
+        xaxis_title='Number of Images',
+        yaxis_title='Total Sales',
+        yaxis2=dict(
+            title='Average Sales per Listing',
+            overlaying='y',
+            side='right'
+        ),
+        height=400
+    )
+    
+    return fig
+
+
+# ==================== VARIATION ANALYSIS ====================
+
+def analyze_variations(sales_df):
+    """Analyze performance by product variations"""
+    if 'Variations' not in sales_df.columns:
         return None
     
-    # Count sales per product
-    sales_count = sales_df.groupby(product_col).agg({
-        'Quantity': 'sum' if 'Quantity' in sales_df.columns else 'count',
-        'Price': 'sum' if 'Price' in sales_df.columns else 'count'
-    }).reset_index()
+    # Parse variations
+    var_sales = {}
+    for _, row in sales_df.iterrows():
+        if pd.notna(row['Variations']):
+            # Parse format like "Color: Blue, Size: M"
+            variations = str(row['Variations']).split(',')
+            for var in variations:
+                if ':' in var:
+                    var_type, var_value = var.split(':', 1)
+                    var_type = var_type.strip()
+                    var_value = var_value.strip()
+                    
+                    if var_type not in var_sales:
+                        var_sales[var_type] = {}
+                    
+                    if var_value not in var_sales[var_type]:
+                        var_sales[var_type][var_value] = 0
+                    
+                    var_sales[var_type][var_value] += row.get('Quantity', 1)
     
-    sales_count.columns = ['Title', 'Sales_Count', 'Revenue']
+    # Format results
+    result = {}
+    for var_type, values in var_sales.items():
+        sorted_values = sorted(values.items(), key=lambda x: x[1], reverse=True)[:10]
+        result[var_type] = sorted_values
     
-    # Merge with listings
-    performance = listings_df.merge(sales_count, on='Title', how='left')
-    performance['Sales_Count'] = performance['Sales_Count'].fillna(0)
-    performance['Revenue'] = performance['Revenue'].fillna(0)
-    
-    return performance
+    return result if result else None
 
 
-def extract_keywords_from_titles(titles):
-    """Extract most frequent keywords from titles"""
-    all_words = []
+# ==================== OPPORTUNITIES IDENTIFICATION ====================
+
+def identify_seo_opportunities(listings_df, seo_scores):
+    """Identify optimization opportunities"""
+    listings_df['seo_score'] = seo_scores
     
-    stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 
-                  'for', 'of', 'with', 'by', 'from', 'as', 'is', 'was'}
+    opportunities = {
+        'priority_listings': listings_df[listings_df['seo_score'] < 70].sort_values('seo_score'),
+        'opportunities': {
+            'missing_tags': listings_df[listings_df['Tags'].isna() | (listings_df['Tags'].str.len() < 10)],
+            'short_description': listings_df[listings_df['Description'].str.len() < 500],
+            'few_images': listings_df[listings_df['Num_Images'] < 5],
+            'short_title': listings_df[listings_df['Title'].str.len() < 80]
+        }
+    }
     
-    for title in titles:
-        if pd.notna(title):
-            # Split by comma and space
-            words = re.split(r'[,\s]+', str(title).lower())
-            # Filter short words and stop words
-            words = [w.strip() for w in words if len(w) > 3 and w not in stop_words]
-            all_words.extend(words)
-    
-    return Counter(all_words)
+    return opportunities
 
 
-# ==================== SIDEBAR ====================
-with st.sidebar:
-    st.markdown("## ⚙️ SEO Analysis Settings")
+# ==================== DISTRIBUTION PLOTS ====================
+
+def plot_seo_score_distribution(seo_scores):
+    """Visualize SEO score distribution"""
+    fig = go.Figure()
     
-    min_score_filter = st.slider(
-        "Min SEO Score",
-        0, 100, 0,
-        help="Filter listings by minimum SEO score"
+    fig.add_trace(go.Histogram(
+        x=seo_scores,
+        nbinsx=20,
+        marker_color='#9b59b6',
+        opacity=0.75
+    ))
+    
+    fig.add_vline(x=np.mean(seo_scores), line_dash="dash", line_color="red", 
+                  annotation_text=f"Average: {np.mean(seo_scores):.1f}")
+    
+    fig.update_layout(
+        title='SEO Score Distribution',
+        xaxis_title='SEO Score',
+        yaxis_title='Number of Listings',
+        height=400
     )
     
-    show_sales = st.checkbox(
-        "Show Sales Data",
-        value=True,
-        help="Cross-reference with sales data if available",
-        disabled='sold_items_df' not in st.session_state
-    )
+    return fig
+
 
 # ==================== MAIN APP ====================
 
-st.markdown('<h1 class="main-header">🔍 SEO Analyzer Dashboard</h1>', unsafe_allow_html=True)
+# Header
+st.markdown('<h1 class="main-header">🔍 SEO Analyzer</h1>', unsafe_allow_html=True)
 
-# Check data availability
-check_data_availability()
+# Check data
+if not check_data_availability():
+    st.stop()
 
 # Load data
 listings_df = load_and_prepare_listings(st.session_state['listings_df'])
+sales_df = st.session_state.get('sales_df', None)
 
-# Optional: Sales data
-sales_df = None
-if show_sales and 'sold_items_df' in st.session_state and st.session_state['sold_items_df'] is not None:
-    sales_df = st.session_state['sold_items_df']
+# Sidebar info
+st.sidebar.markdown("### 👤 User Info")
+st.sidebar.info(f"📧 {user_email}")
+st.sidebar.success(f"💎 Status: {'Premium' if is_premium else 'Free'}")
 
-# Calculate SEO scores for all listings
-st.info("🔍 Analyzing SEO for all listings...")
+if not is_premium:
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 🚀 Upgrade Benefits")
+    st.sidebar.markdown("""
+    **Premium Features:**
+    - 📊 SEO vs Sales correlation
+    - 🎯 Advanced recommendations
+    - 📸 Image performance analysis
+    - 🏷️ Tag performance tracking
+    - ⚠️ Zero-sales alerts
+    """)
+    if st.sidebar.button("💎 Upgrade Now", type="primary", use_container_width=True):
+        st.switch_page("pages/Premium.py")
+
+# Calculate SEO scores
+st.markdown("### 🔄 Analyzing your listings...")
+progress_bar = st.progress(0)
 
 seo_results = []
 for idx, row in listings_df.iterrows():
-    score, issues, recs = calculate_title_seo_score(row['Title'])
-    
-    seo_results.append({
-        'Title': row['Title'],
-        'SEO_Score': score,
-        'Price': row.get('Price', 0),
-        'Num_Images': row.get('Num_Images', 0),
-        'Tags': row.get('Tags', ''),
-        'Issues': issues,
-        'Recommendations': recs
-    })
+    result = calculate_enhanced_seo_score(row)
+    seo_results.append(result)
+    progress_bar.progress((idx + 1) / len(listings_df))
 
-seo_analysis = pd.DataFrame(seo_results)
+progress_bar.empty()
 
-# Cross with sales if available
-if sales_df is not None:
-    performance_df = analyze_listing_performance(listings_df, sales_df)
-    if performance_df is not None:
-        seo_analysis = seo_analysis.merge(
-            performance_df[['Title', 'Sales_Count', 'Revenue']], 
-            on='Title', 
-            how='left'
-        )
-        seo_analysis['Sales_Count'] = seo_analysis['Sales_Count'].fillna(0)
-        seo_analysis['Revenue'] = seo_analysis['Revenue'].fillna(0)
+# Add scores to dataframe
+listings_df['SEO_Score'] = [r['score'] for r in seo_results]
+listings_df['SEO_Grade'] = [r['grade'] for r in seo_results]
+listings_df['SEO_Issues'] = [r['issues'] for r in seo_results]
+listings_df['SEO_Recommendations'] = [r['recommendations'] for r in seo_results]
 
-# Apply filter
-filtered_seo = seo_analysis[seo_analysis['SEO_Score'] >= min_score_filter]
+seo_scores = listings_df['SEO_Score'].tolist()
+avg_score = np.mean(seo_scores)
 
-st.success(f"✅ Analyzed {len(seo_analysis)} listings!")
-
-# ==================== TABS ====================
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📊 SEO Overview",
-    "🔍 Title Analysis",
-    "🏷️ Tags Performance",
-    "📈 Advanced Analytics",
-    "🤖 AI Recommendations"
+# Create tabs
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "📊 Overview", 
+    "📝 Titles", 
+    "🏷️ Tags", 
+    "📸 Images",
+    "📈 Performance",
+    "🤖 Recommendations"
 ])
 
+# ==================== TAB 1: OVERVIEW ====================
 with tab1:
     st.markdown("## 📊 SEO Overview")
-    
-    # KPIs
-    avg_score = seo_analysis['SEO_Score'].mean()
-    excellent_count = len(seo_analysis[seo_analysis['SEO_Score'] >= 80])
-    to_optimize_count = len(seo_analysis[seo_analysis['SEO_Score'] < 60])
     
     col1, col2, col3, col4 = st.columns(4)
     
@@ -372,265 +673,213 @@ with tab1:
         st.metric("Average SEO Score", f"{avg_score:.1f}/100")
     
     with col2:
-        excellent_pct = (excellent_count / len(seo_analysis) * 100) if len(seo_analysis) > 0 else 0
-        st.metric("Excellent Listings", f"{excellent_count}", delta=f"{excellent_pct:.0f}%")
+        excellent = sum(1 for s in seo_scores if s >= 80)
+        st.metric("Excellent Listings", excellent, delta=f"{excellent/len(seo_scores)*100:.0f}%")
     
     with col3:
-        to_optimize_pct = (to_optimize_count / len(seo_analysis) * 100) if len(seo_analysis) > 0 else 0
-        st.metric("Need Optimization", f"{to_optimize_count}", 
-                 delta=f"-{to_optimize_pct:.0f}%", delta_color="inverse")
+        to_improve = sum(1 for s in seo_scores if s < 70)
+        st.metric("Needs Improvement", to_improve, delta=f"{to_improve/len(seo_scores)*100:.0f}%", delta_color="inverse")
     
     with col4:
-        avg_images = seo_analysis['Num_Images'].mean()
-        st.metric("Avg Photos", f"{avg_images:.1f}")
-    
-    st.markdown("---")
+        st.metric("Total Listings", len(listings_df))
     
     # Score distribution
-    col1, col2 = st.columns(2)
+    st.plotly_chart(plot_seo_score_distribution(seo_scores), use_container_width=True)
     
-    with col1:
-        st.markdown("### 📊 SEO Score Distribution")
-        
-        fig = px.histogram(
-            seo_analysis,
-            x='SEO_Score',
-            nbins=20,
-            title="SEO Score Distribution",
-            color_discrete_sequence=['#9b59b6']
-        )
-        fig.update_layout(
-            xaxis_title="SEO Score",
-            yaxis_title="Number of Listings",
-            height=400
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    # Quick stats
+    st.markdown("---")
+    st.markdown("### 📋 Quick Stats")
     
-    with col2:
-        st.markdown("### 🎯 SEO Categories")
-        
-        categories = pd.cut(seo_analysis['SEO_Score'], 
-                           bins=[0, 40, 60, 80, 100],
-                           labels=['🔴 Low', '🟠 Average', '🟡 Good', '🟢 Excellent'])
-        
-        cat_counts = categories.value_counts()
-        
-        fig = px.pie(
-            values=cat_counts.values,
-            names=cat_counts.index,
-            title="SEO Categories",
-            color_discrete_sequence=['#dc3545', '#ffc107', '#28a745', '#9b59b6']
-        )
-        fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # All listings table
-    st.markdown("### 📋 All Listings with SEO Score")
-    
-    display_df = filtered_seo[['Title', 'SEO_Score', 'Price', 'Num_Images']].copy()
-    display_df['SEO_Score'] = display_df['SEO_Score'].apply(lambda x: f"{x:.0f}/100")
-    display_df['Price'] = display_df['Price'].apply(lambda x: f"${x:.2f}")
-    
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
-
-with tab2:
-    st.markdown("## 🔍 Detailed Title Analysis")
-    
-    # Title statistics
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        avg_title_len = listings_df['Title'].str.len().mean()
-        st.metric("Average Length", f"{avg_title_len:.0f} chars")
+        st.markdown(f"""
+        <div class="metric-card">
+        <h4>🏆 Top Performer</h4>
+        <p><strong>{listings_df.nlargest(1, 'SEO_Score')['Title'].values[0][:50]}...</strong></p>
+        <p>Score: {listings_df['SEO_Score'].max():.0f}/100</p>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col2:
-        optimal_titles = len(listings_df[listings_df['Title'].str.len().between(100, 140)])
-        st.metric("Optimal Length (100-140)", optimal_titles)
+        st.markdown(f"""
+        <div class="metric-card">
+        <h4>📉 Needs Most Work</h4>
+        <p><strong>{listings_df.nsmallest(1, 'SEO_Score')['Title'].values[0][:50]}...</strong></p>
+        <p>Score: {listings_df['SEO_Score'].min():.0f}/100</p>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col3:
-        short_titles = len(listings_df[listings_df['Title'].str.len() < 80])
-        st.metric("Too Short (<80)", short_titles)
+        improvement_potential = (100 - avg_score) * len(listings_df)
+        st.markdown(f"""
+        <div class="metric-card">
+        <h4>💡 Improvement Potential</h4>
+        <p><strong>{improvement_potential:.0f}</strong> total points</p>
+        <p>Average gain: {100 - avg_score:.1f} pts/listing</p>
+        </div>
+        """, unsafe_allow_html=True)
     
+    # Top/Bottom listings
     st.markdown("---")
-    
-    # Title length distribution
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("### 📏 Title Length Distribution")
-        
-        fig = px.histogram(
-            listings_df,
-            x=listings_df['Title'].str.len(),
-            nbins=20,
-            title="Title Length (characters)",
-            color_discrete_sequence=['#3498db']
-        )
-        fig.add_vline(x=100, line_dash="dash", line_color="green", 
-                     annotation_text="Min optimal (100)")
-        fig.add_vline(x=140, line_dash="dash", line_color="red",
-                     annotation_text="Max Etsy (140)")
-        fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
+        st.markdown("### 🏆 Top 5 Listings")
+        top5 = listings_df.nlargest(5, 'SEO_Score')[['Title', 'SEO_Score', 'SEO_Grade']]
+        top5['SEO_Score'] = top5['SEO_Score'].apply(lambda x: f"{x:.0f}/100")
+        st.dataframe(top5, use_container_width=True, hide_index=True)
     
     with col2:
-        st.markdown("### 🎯 Length vs SEO Score")
+        st.markdown("### ⚠️ Bottom 5 Listings")
+        bottom5 = listings_df.nsmallest(5, 'SEO_Score')[['Title', 'SEO_Score', 'SEO_Grade']]
+        bottom5['SEO_Score'] = bottom5['SEO_Score'].apply(lambda x: f"{x:.0f}/100")
+        st.dataframe(bottom5, use_container_width=True, hide_index=True)
+
+# ==================== TAB 2: TITLES ====================
+with tab2:
+    st.markdown("## 📝 Title Analysis")
+    
+    title_analysis = analyze_titles(listings_df)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.plotly_chart(plot_title_length_analysis(title_analysis), use_container_width=True)
+    
+    with col2:
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.metric("Avg Length", f"{title_analysis['avg_length']:.0f} chars")
+            st.metric("Avg Words", f"{title_analysis['avg_words']:.1f}")
         
-        fig = px.scatter(
-            seo_analysis,
-            x=listings_df['Title'].str.len(),
-            y='SEO_Score',
-            title="Title Length Impact on SEO Score",
-            color='SEO_Score',
-            color_continuous_scale='RdYlGn',
-            labels={'x': 'Title Length (chars)', 'y': 'SEO Score'}
-        )
-        fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
+        with col_b:
+            st.metric("Optimal Titles", f"{title_analysis['optimal_length']}")
+            st.metric("Too Short", f"{title_analysis['too_short']}")
+    
+    # Top keywords
+    st.markdown("---")
+    with st.expander("🔑 Top 20 Keywords in Titles"):
+        keywords_df = pd.DataFrame(title_analysis['top_keywords'], columns=['Keyword', 'Frequency'])
+        st.dataframe(keywords_df, use_container_width=True, hide_index=True)
+
+# ==================== TAB 3: TAGS ====================
+with tab3:
+    st.markdown("## 🏷️ Tag Analysis")
+    
+    tag_analysis = analyze_tags(listings_df)
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Avg Tags/Listing", f"{tag_analysis['avg_tags_per_listing']:.1f}")
+    
+    with col2:
+        st.metric("Listings with 13 Tags", tag_analysis['max_tags_listings'],
+                 delta=f"{tag_analysis['max_tags_listings']/len(listings_df)*100:.0f}%")
+    
+    with col3:
+        st.metric("Unique Tags", tag_analysis['total_unique_tags'])
     
     st.markdown("---")
     
-    # Detailed listing analysis
-    st.markdown("### 📝 Detailed Analysis by Listing")
+    col1, col2 = st.columns(2)
     
-    for idx, row in filtered_seo.head(20).iterrows():  # Limit to 20 for performance
-        category, css_class = get_seo_category(row['SEO_Score'])
-        
-        title_preview = row['Title'][:60] + "..." if len(row['Title']) > 60 else row['Title']
-        
-        with st.expander(f"{category} - {title_preview} (Score: {row['SEO_Score']:.0f}/100)"):
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                st.markdown(f"**Full Title:** {row['Title']}")
-                st.markdown(f"**Length:** {len(row['Title'])} characters")
-                st.markdown(f"**Price:** ${row['Price']:.2f}")
-                st.markdown(f"**Photos:** {row['Num_Images']}")
-                
-                if row['Issues']:
-                    st.markdown("**⚠️ Issues:**")
-                    for issue in row['Issues']:
-                        st.markdown(f"- {issue}")
-            
-            with col2:
-                st.markdown("**💡 Recommendations:**")
-                if row['Recommendations']:
-                    for rec in row['Recommendations']:
-                        st.markdown(f"- {rec}")
-                else:
-                    st.success("✅ Title is well optimized!")
+    with col1:
+        st.plotly_chart(plot_tag_frequency(tag_analysis), use_container_width=True)
+    
+    with col2:
+        if sales_df is not None:
+            tag_perf = analyze_tag_performance(listings_df, sales_df)
+            if tag_perf:
+                st.plotly_chart(plot_tag_performance(tag_perf), use_container_width=True)
+            else:
+                st.info("💡 Not enough data to analyze tag performance")
+        else:
+            st.info("💡 Upload sales data to see best performing tags")
 
-with tab3:
-    st.markdown("## 🏷️ Tags Analysis")
-    
-    # Extract all tags
-    all_tags = []
-    for idx, row in listings_df.iterrows():
-        if 'Tags' in row and pd.notna(row['Tags']):
-            tags = analyze_tags(row['Tags'])
-            all_tags.extend(tags)
-    
-    if all_tags:
-        tag_counter = Counter(all_tags)
-        most_common_tags = tag_counter.most_common(20)
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("### 🏆 Top 20 Most Used Tags")
-            
-            tags_df = pd.DataFrame(most_common_tags, columns=['Tag', 'Count'])
-            
-            fig = px.bar(
-                tags_df,
-                x='Count',
-                y='Tag',
-                orientation='h',
-                title="Most Frequent Tags",
-                color='Count',
-                color_continuous_scale='Purples'
-            )
-            fig.update_layout(height=600, yaxis={'categoryorder': 'total ascending'})
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            st.markdown("### 📊 Tag Statistics")
-            
-            st.metric("Unique Tags", len(tag_counter))
-            st.metric("Total Tags", len(all_tags))
-            st.metric("Avg per Listing", f"{len(all_tags)/len(listings_df):.1f}")
-            
-            st.markdown("---")
-            
-            st.markdown("### 🎯 Recommended Tags")
-            
-            recommended_tags = [
-                'handmade', 'gift', 'vintage', 'custom', 'personalized',
-                'unique', 'birthday', 'wedding', 'home', 'decor',
-                'jewelry', 'art', 'minimalist', 'boho', 'modern'
-            ]
-            
-            tags_present = [tag for tag in recommended_tags if tag in all_tags]
-            tags_missing = [tag for tag in recommended_tags if tag not in all_tags]
-            
-            st.markdown("**✅ Present Tags:**")
-            st.write(", ".join(tags_present) if tags_present else "None")
-            
-            st.markdown("**❌ Missing Tags (Opportunities):**")
-            st.write(", ".join(tags_missing) if tags_missing else "All present!")
-        
-        # Tags by listing
-        st.markdown("---")
-        st.markdown("### 📋 Tags per Listing")
-        
-        tags_by_listing = []
-        for idx, row in listings_df.iterrows():
-            tags = analyze_tags(row.get('Tags', ''))
-            tags_by_listing.append({
-                'Title': row['Title'][:50] + "...",
-                'Num_Tags': len(tags),
-                'Tags': ', '.join(tags[:5]) + ('...' if len(tags) > 5 else '')
-            })
-        
-        st.dataframe(pd.DataFrame(tags_by_listing), use_container_width=True, hide_index=True)
-    
-    else:
-        st.warning("⚠️ No tags found in your listings. Add tags to improve SEO!")
-
+# ==================== TAB 4: IMAGES ====================
 with tab4:
-    st.markdown("## 📈 Advanced Analytics")
+    st.markdown("## 📸 Image Analysis")
+    
+    image_analysis = analyze_images(listings_df)
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Avg Images/Listing", f"{image_analysis['avg_images']:.1f}")
+    
+    with col2:
+        st.metric("Listings with 10 Images", image_analysis['max_images_listings'],
+                 delta=f"{image_analysis['max_images_listings']/len(listings_df)*100:.0f}%")
+    
+    with col3:
+        st.metric("Less than 5 Images", image_analysis['under_5_images'],
+                 delta=f"{image_analysis['under_5_images']/len(listings_df)*100:.0f}%",
+                 delta_color="inverse")
+    
+    # Image-sales correlation
+    if sales_df is not None:
+        st.markdown("---")
+        image_corr = correlate_images_to_sales(listings_df, sales_df)
+        if image_corr is not None:
+            st.plotly_chart(plot_image_correlation(image_corr), use_container_width=True)
+            
+            st.markdown("""
+            <div class="info-box">
+            💡 <strong>Insight:</strong> Listings with more images typically generate more sales. 
+            Aim for at least 7-10 high-quality images per listing.
+            </div>
+            """, unsafe_allow_html=True)
+
+# ==================== TAB 5: PERFORMANCE ====================
+with tab5:
+    st.markdown("## 📈 SEO Performance Analysis")
     
     if is_premium:
-        st.success("💎 **Premium Features Unlocked**")
-        
-        if sales_df is not None and 'Sales_Count' in seo_analysis.columns:
-            # SEO Score vs Sales correlation
-            st.markdown("### 🎯 SEO Score Impact on Sales")
+        if sales_df is not None:
+            st.success("💎 **Premium Analytics Unlocked**")
             
-            col1, col2 = st.columns(2)
+            # Merge sales data
+            item_name_col = 'Item Name' if 'Item Name' in sales_df.columns else 'TITRE'
             
-            with col1:
-                fig = px.scatter(
-                    seo_analysis,
-                    x='SEO_Score',
-                    y='Sales_Count',
-                    size='Revenue',
-                    color='SEO_Score',
-                    hover_data=['Title'],
-                    title="SEO Score vs Sales Count",
-                    color_continuous_scale='RdYlGn',
-                    labels={'Sales_Count': 'Number of Sales', 'SEO_Score': 'SEO Score'}
-                )
-                fig.update_layout(height=400)
-                st.plotly_chart(fig, use_container_width=True)
+            sales_summary = sales_df.groupby(item_name_col).agg({
+                'Quantity': 'sum',
+                'Price': 'sum'
+            }).reset_index()
+            sales_summary.columns = ['Title', 'Sales_Count', 'Revenue']
             
-            with col2:
-                # Best-sellers vs non-sellers
-                best_sellers = seo_analysis[seo_analysis['Sales_Count'] > 0]
-                non_sellers = seo_analysis[seo_analysis['Sales_Count'] == 0]
-                
+            seo_analysis = listings_df.merge(sales_summary, on='Title', how='left')
+            seo_analysis['Sales_Count'] = seo_analysis['Sales_Count'].fillna(0)
+            seo_analysis['Revenue'] = seo_analysis['Revenue'].fillna(0)
+            
+            # SEO vs Sales correlation
+            st.markdown("### 📊 SEO Score vs Sales Correlation")
+            
+            fig = px.scatter(
+                seo_analysis,
+                x='SEO_Score',
+                y='Sales_Count',
+                size='Revenue',
+                hover_data=['Title'],
+                title='SEO Score Impact on Sales',
+                labels={'SEO_Score': 'SEO Score', 'Sales_Count': 'Number of Sales'},
+                color='SEO_Score',
+                color_continuous_scale='RdYlGn'
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Best-sellers vs non-sellers
+            st.markdown("---")
+            st.markdown("### 🎯 Best-Sellers vs Non-Sellers")
+            
+            threshold = seo_analysis['Sales_Count'].quantile(0.7)
+            best_sellers = seo_analysis[seo_analysis['Sales_Count'] >= threshold]
+            non_sellers = seo_analysis[seo_analysis['Sales_Count'] == 0]
+            
+            if len(best_sellers) > 0 or len(non_sellers) > 0:
                 comparison = pd.DataFrame({
-                    'Category': ['Products Sold', 'Products Not Sold'],
+                    'Category': ['Best-Sellers', 'Zero Sales'],
                     'Avg SEO Score': [
                         best_sellers['SEO_Score'].mean() if len(best_sellers) > 0 else 0,
                         non_sellers['SEO_Score'].mean() if len(non_sellers) > 0 else 0
@@ -648,53 +897,47 @@ with tab4:
                     color_continuous_scale='RdYlGn'
                 )
                 fig.update_traces(texttemplate='%{text:.1f}', textposition='outside')
-                fig.update_layout(height=400)
                 st.plotly_chart(fig, use_container_width=True)
             
-            st.markdown("---")
-            
-            # Photos impact
-            st.markdown("### 📸 Photos Impact on Sales")
-            
-            photo_analysis = seo_analysis.groupby('Num_Images').agg({
-                'Sales_Count': 'sum',
-                'Revenue': 'sum',
-                'Title': 'count'
-            }).reset_index()
-            photo_analysis.columns = ['Photos', 'Sales', 'Revenue', 'Listings']
-            
-            fig = px.bar(
-                photo_analysis,
-                x='Photos',
-                y='Sales',
-                title='Sales by Number of Photos',
-                color='Sales',
-                color_continuous_scale='Blues',
-                text='Sales'
-            )
-            fig.update_traces(textposition='outside')
-            st.plotly_chart(fig, use_container_width=True)
-            
             # Zero-sales alert
-            zero_sales = seo_analysis[seo_analysis['Sales_Count'] == 0]
-            
-            if len(zero_sales) > 0:
+            if len(non_sellers) > 0:
                 st.markdown("---")
                 st.markdown("### ⚠️ Listings with Zero Sales")
                 
                 st.markdown(f"""
                 <div class="warning-box">
-                <strong>Action Needed:</strong> {len(zero_sales)} listings have <strong>0 sales</strong>.<br>
-                Average SEO Score: {zero_sales['SEO_Score'].mean():.1f}/100<br>
+                <strong>Action Needed:</strong> {len(non_sellers)} listings have <strong>0 sales</strong>.<br>
+                Average SEO Score: {non_sellers['SEO_Score'].mean():.1f}/100<br>
                 <strong>Recommendation:</strong> Optimize titles, add more photos, review pricing.
                 </div>
                 """, unsafe_allow_html=True)
                 
-                display_zero = zero_sales.nsmallest(10, 'SEO_Score')[['Title', 'SEO_Score', 'Price', 'Num_Images']]
+                display_zero = non_sellers.nsmallest(10, 'SEO_Score')[['Title', 'SEO_Score', 'Price', 'Num_Images']]
                 display_zero['SEO_Score'] = display_zero['SEO_Score'].apply(lambda x: f"{x:.0f}/100")
                 display_zero['Price'] = display_zero['Price'].apply(lambda x: f"${x:.2f}")
-                
                 st.dataframe(display_zero, use_container_width=True, hide_index=True)
+            
+            # Variations analysis
+            if 'Variations' in sales_df.columns:
+                st.markdown("---")
+                st.markdown("### 🎨 Variation Performance")
+                
+                var_analysis = analyze_variations(sales_df)
+                
+                if var_analysis:
+                    for var_type, values in var_analysis.items():
+                        with st.expander(f"📊 {var_type}"):
+                            var_df = pd.DataFrame(values, columns=['Value', 'Sales'])
+                            
+                            fig = px.bar(
+                                var_df,
+                                x='Value',
+                                y='Sales',
+                                title=f"Performance by {var_type}",
+                                color='Sales',
+                                color_continuous_scale='Blues'
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
         
         else:
             st.warning("📊 Upload Sold Items CSV to unlock sales correlation analysis")
@@ -702,32 +945,19 @@ with tab4:
     else:
         # Premium CTA
         st.markdown("""
-        <div class="info-box">
-        💎 <strong>Premium Features Available with Insights ($9/month):</strong>
-        <ul>
-        <li>🎯 SEO Score vs Sales correlation</li>
-        <li>📊 Best-sellers vs Non-sellers comparison</li>
-        <li>📸 Photos impact on performance</li>
-        <li>⚠️ Zero-sales listings identification</li>
-        <li>💡 SEO optimization ROI tracking</li>
-        </ul>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        if sales_df is not None:
-            st.markdown("### 🎯 SEO vs Sales (preview)")
-            st.markdown("""
-            <div style='filter: blur(8px); pointer-events: none; user-select: none;'>
-                <img src='https://via.placeholder.com/800x400/f0f2f6/666?text=SEO+Score+vs+Sales+Chart' style='width: 100%; border-radius: 10px;'>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        st.markdown("""
         <div class="premium-lock">
-            <h3 style="margin-bottom: 1rem;">💎 Unlock Advanced Analytics</h3>
-            <p style="font-size: 1.1rem; margin-bottom: 2rem;">
+            <h3 style="margin-bottom: 1rem;">💎 Unlock Advanced Performance Analytics</h3>
+            <p style="font-size: 1.1rem; margin-bottom: 0.5rem;">
+                Get insights on what drives sales:
+            </p>
+            <ul style="text-align: left; max-width: 600px; margin: 20px auto; font-size: 1rem;">
+                <li>🎯 SEO Score vs Sales correlation</li>
+                <li>📊 Best-sellers vs Non-sellers comparison</li>
+                <li>📸 Image impact on performance</li>
+                <li>⚠️ Zero-sales listings identification</li>
+                <li>🎨 Variation performance analysis</li>
+            </ul>
+            <p style="font-size: 1.2rem; font-weight: bold; margin-top: 2rem;">
                 Only $9/month
             </p>
         </div>
@@ -738,56 +968,78 @@ with tab4:
             if st.button("🚀 Upgrade to Premium", type="primary", use_container_width=True):
                 st.switch_page("pages/Premium.py")
 
-with tab5:
+# ==================== TAB 6: RECOMMENDATIONS ====================
+with tab6:
     st.markdown("## 🤖 AI-Powered Recommendations")
     
     if is_premium:
         st.success("💎 **Premium Recommendations**")
         
-        # Top opportunities
-        worst_performers = seo_analysis.nsmallest(5, 'SEO_Score')
+        # Identify opportunities
+        opportunities = identify_seo_opportunities(listings_df, seo_scores)
         
-        st.markdown("### 🎯 Top 5 Listings to Optimize")
+        st.markdown("### 🎯 Priority Optimization Targets")
+        
+        # Top 5 worst performers
+        worst_performers = listings_df.nsmallest(5, 'SEO_Score')
         
         for idx, row in worst_performers.iterrows():
             st.markdown(f"""
             <div class="warning-box">
             <strong>📝 {row['Title'][:60]}...</strong><br>
-            SEO Score: <strong>{row['SEO_Score']:.0f}/100</strong> | Price: ${row['Price']:.2f} | Photos: {row['Num_Images']}<br>
-            <strong>Priority Actions:</strong>
+            SEO Score: <strong>{row['SEO_Score']:.0f}/100</strong> | 
+            Grade: {row['SEO_Grade']} | 
+            Images: {row['Num_Images']}<br>
+            <strong>Top Priority Actions:</strong>
             <ul>
-            {''.join(['<li>' + rec + '</li>' for rec in row['Recommendations'][:3]])}
+            {''.join(['<li>' + rec + '</li>' for rec in row['SEO_Recommendations'][:3]])}
             </ul>
             </div>
             """, unsafe_allow_html=True)
         
+        # Opportunities breakdown
+        st.markdown("---")
+        st.markdown("### 💡 Optimization Opportunities")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.metric("Tags to Optimize", len(opportunities['opportunities']['missing_tags']))
+            st.metric("Short Descriptions", len(opportunities['opportunities']['short_description']))
+        
+        with col2:
+            st.metric("Few Images", len(opportunities['opportunities']['few_images']))
+            st.metric("Short Titles", len(opportunities['opportunities']['short_title']))
+        
         # General recommendations
         st.markdown("---")
-        st.markdown("### 💡 General SEO Improvements")
+        st.markdown("### 📋 General Improvements")
         
         if avg_score < 70:
-            st.markdown("""
+            st.markdown(f"""
             <div class="warning-box">
-            ⚠️ <strong>Your average SEO score is low ({:.1f}/100)</strong><br>
-            <strong>Priority:</strong> Focus on improving title quality across all listings.
+            ⚠️ <strong>Your average SEO score is low ({avg_score:.1f}/100)</strong><br>
+            <strong>Priority:</strong> Focus on improving title quality and tag usage across all listings.
             </div>
-            """.format(avg_score), unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
         
-        if seo_analysis['Num_Images'].mean() < 5:
-            st.markdown("""
+        if listings_df['Num_Images'].mean() < 5:
+            st.markdown(f"""
             <div class="info-box">
             📸 <strong>Add more photos!</strong><br>
-            Listings with 5+ photos typically perform better. Average: {:.1f} photos per listing.
+            Listings with 5+ photos typically perform better. 
+            Average: {listings_df['Num_Images'].mean():.1f} photos per listing.
             </div>
-            """.format(seo_analysis['Num_Images'].mean()), unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
         
-        if len(all_tags) < len(listings_df) * 10:
-            st.markdown("""
+        avg_tags = listings_df['Tags'].apply(lambda x: len(str(x).split(',')) if pd.notna(x) else 0).mean()
+        if avg_tags < 10:
+            st.markdown(f"""
             <div class="info-box">
             🏷️ <strong>Use all 13 tag slots</strong><br>
-            You're averaging {:.1f} tags per listing. Etsy allows 13 tags - use them all!
+            You're averaging {avg_tags:.1f} tags per listing. Etsy allows 13 tags - use them all!
             </div>
-            """.format(len(all_tags) / len(listings_df)), unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
     
     else:
         # Premium CTA
@@ -803,6 +1055,7 @@ with tab5:
                 <li>✅ General SEO improvement strategies</li>
                 <li>✅ Photo and tag optimization tips</li>
                 <li>✅ Keyword suggestions based on your niche</li>
+                <li>✅ Variation performance insights</li>
             </ul>
             <p style="font-size: 1.2rem; font-weight: bold; margin-top: 2rem;">
                 Only $9/month
@@ -831,7 +1084,7 @@ with col3:
 
 st.markdown("""
 <div style='text-align: center; color: #666; padding: 20px; margin-top: 2rem;'>
-    <p><strong>Etsy Dashboard</strong> - SEO Analyzer v1.0</p>
+    <p><strong>Etsy Dashboard</strong> - SEO Analyzer v2.0 (Enriched)</p>
     <p style='font-size: 0.9em;'>Optimize your listings to rank higher in Etsy search</p>
 </div>
 """, unsafe_allow_html=True)

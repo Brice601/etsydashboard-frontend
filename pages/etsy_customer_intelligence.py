@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 from collections import Counter
 import json
 import re
+from typing import Dict, Tuple, Optional
 
 # ==================== PAGE CONFIGURATION ====================
 st.set_page_config(
@@ -339,6 +340,370 @@ def detect_recurring_customers(customer_analysis):
     return recurring
 
 
+# ==================== ENRICHED ANALYSIS FUNCTIONS ====================
+
+def calculate_rfm_analysis(orders_df) -> Optional[pd.DataFrame]:
+    """
+    RFM Segmentation (Recency, Frequency, Monetary)
+    Segments customers based on their purchase behavior
+    """
+    if 'Date' not in orders_df.columns or 'Buyer' not in orders_df.columns:
+        return None
+    
+    # Reference date (today or max date in data)
+    reference_date = orders_df['Date'].max() + timedelta(days=1)
+    
+    # Calculate RFM
+    rfm = orders_df.groupby('Buyer').agg({
+        'Date': lambda x: (reference_date - x.max()).days,  # Recency
+        'Order_ID': 'nunique',  # Frequency
+        'Total': 'sum'  # Monetary
+    }).reset_index()
+    
+    rfm.columns = ['Customer', 'Recency', 'Frequency', 'Monetary']
+    
+    # Scoring (1-4 for each dimension)
+    try:
+        rfm['R_Score'] = pd.qcut(rfm['Recency'], 4, labels=[4,3,2,1], duplicates='drop')
+        rfm['F_Score'] = pd.qcut(rfm['Frequency'], 4, labels=[1,2,3,4], duplicates='drop')
+        rfm['M_Score'] = pd.qcut(rfm['Monetary'], 4, labels=[1,2,3,4], duplicates='drop')
+    except Exception:
+        # Fallback if not enough data for quartiles
+        rfm['R_Score'] = pd.cut(rfm['Recency'], 4, labels=[4,3,2,1])
+        rfm['F_Score'] = pd.cut(rfm['Frequency'], 4, labels=[1,2,3,4])
+        rfm['M_Score'] = pd.cut(rfm['Monetary'], 4, labels=[1,2,3,4])
+    
+    # Combined score
+    rfm['RFM_Score'] = (rfm['R_Score'].astype(str) + 
+                       rfm['F_Score'].astype(str) + 
+                       rfm['M_Score'].astype(str))
+    
+    # Customer segmentation
+    def segment_customer(row):
+        score = int(row['R_Score']) + int(row['F_Score']) + int(row['M_Score'])
+        
+        if score >= 9:
+            return '🏆 Champions'
+        elif score >= 7:
+            return '💚 Loyal'
+        elif score >= 5:
+            return '🌱 Potential'
+        elif score >= 3:
+            return '⚠️ At Risk'
+        else:
+            return '💤 Dormant'
+    
+    rfm['Segment'] = rfm.apply(segment_customer, axis=1)
+    
+    return rfm
+
+
+def calculate_detailed_customer_metrics(orders_df) -> Optional[pd.DataFrame]:
+    """
+    Calculate detailed metrics per customer
+    """
+    if 'Buyer' not in orders_df.columns:
+        return None
+    
+    customer_metrics = orders_df.groupby('Buyer').agg({
+        'Order_ID': 'nunique',  # Number of orders
+        'Total': ['sum', 'mean'],  # LTV and avg basket
+        'Date': ['min', 'max']  # First and last order
+    }).reset_index()
+    
+    customer_metrics.columns = ['Customer', 'Num_Orders', 'LTV', 'Avg_Order', 'First_Purchase', 'Last_Purchase']
+    
+    # Calculate days between purchases (for repeat customers)
+    customer_metrics['Days_Since_First'] = (customer_metrics['Last_Purchase'] - customer_metrics['First_Purchase']).dt.days
+    customer_metrics['Avg_Days_Between_Orders'] = customer_metrics['Days_Since_First'] / (customer_metrics['Num_Orders'] - 1)
+    customer_metrics['Avg_Days_Between_Orders'] = customer_metrics['Avg_Days_Between_Orders'].fillna(0)
+    
+    # Calculate days since last order
+    reference_date = orders_df['Date'].max()
+    customer_metrics['Days_Since_Last_Order'] = (reference_date - customer_metrics['Last_Purchase']).dt.days
+    
+    # Identify repeat customers
+    customer_metrics['Is_Repeat'] = customer_metrics['Num_Orders'] > 1
+    
+    return customer_metrics
+
+
+def identify_vip_customers(customer_metrics: pd.DataFrame, percentile: int = 90) -> Tuple[pd.DataFrame, Dict]:
+    """
+    Identify VIP customers (top X%)
+    """
+    if customer_metrics is None or len(customer_metrics) == 0:
+        return None, None
+    
+    # Top X% threshold
+    threshold = customer_metrics['LTV'].quantile(percentile / 100)
+    
+    vip_customers = customer_metrics[customer_metrics['LTV'] >= threshold].copy()
+    vip_customers = vip_customers.sort_values('LTV', ascending=False)
+    
+    # Check if we have VIP customers
+    if len(vip_customers) == 0:
+        return None, None
+    
+    # VIP stats
+    total_ca = customer_metrics['LTV'].sum()
+    vip_ca = vip_customers['LTV'].sum()
+    
+    vip_stats = {
+        'count': len(vip_customers),
+        'total_ca': vip_ca,
+        'avg_ltv': vip_customers['LTV'].mean() if len(vip_customers) > 0 else 0,
+        'pct_of_total_ca': (vip_ca / total_ca * 100) if total_ca > 0 else 0
+    }
+    
+    return vip_customers, vip_stats
+
+
+def analyze_customer_retention_detailed(customer_metrics: pd.DataFrame) -> Dict:
+    """
+    Detailed retention analysis
+    """
+    total_customers = len(customer_metrics)
+    repeat_customers = len(customer_metrics[customer_metrics['Is_Repeat']])
+    
+    repeat_rate = (repeat_customers / total_customers * 100) if total_customers > 0 else 0
+    
+    # Order distribution
+    order_counts = customer_metrics['Num_Orders'].value_counts().sort_index()
+    
+    # Average days between orders (for repeat customers only)
+    repeat_df = customer_metrics[customer_metrics['Is_Repeat']]
+    avg_days_between = repeat_df['Avg_Days_Between_Orders'].mean() if len(repeat_df) > 0 else 0
+    
+    return {
+        'total_customers': total_customers,
+        'repeat_customers': repeat_customers,
+        'repeat_rate': repeat_rate,
+        'order_distribution': order_counts.to_dict(),
+        'avg_days_between_orders': avg_days_between
+    }
+
+
+def identify_churn_risk_customers(customer_metrics: pd.DataFrame, days_threshold: int = 90) -> pd.DataFrame:
+    """
+    Identify customers at risk of churn
+    """
+    at_risk = customer_metrics[
+        (customer_metrics['Days_Since_Last_Order'] > days_threshold) &
+        (customer_metrics['Num_Orders'] > 1)  # Only repeat customers
+    ].copy()
+    
+    at_risk = at_risk.sort_values('LTV', ascending=False)
+    
+    return at_risk
+
+
+def analyze_geography_detailed(orders_df) -> Optional[Dict]:
+    """
+    Detailed geographic analysis by country, state, and city
+    """
+    if 'Country' not in orders_df.columns:
+        return None
+    
+    geo_analysis = {
+        'by_country': orders_df.groupby('Country').agg({
+            'Order_ID': 'count',
+            'Total': ['sum', 'mean']
+        }).reset_index()
+    }
+    
+    # Flatten columns
+    geo_analysis['by_country'].columns = ['Country', 'Orders', 'Revenue', 'Avg_Basket']
+    geo_analysis['by_country'] = geo_analysis['by_country'].sort_values('Revenue', ascending=False)
+    
+    # By city (if available)
+    if 'City' in orders_df.columns:
+        geo_analysis['by_city'] = orders_df.groupby(['Country', 'City']).agg({
+            'Order_ID': 'count',
+            'Total': 'sum'
+        }).reset_index()
+        geo_analysis['by_city'].columns = ['Country', 'City', 'Orders', 'Revenue']
+        geo_analysis['by_city'] = geo_analysis['by_city'].nlargest(20, 'Orders')
+    else:
+        geo_analysis['by_city'] = None
+    
+    return geo_analysis
+
+
+def analyze_reviews_detailed(orders_df, reviews_df) -> Optional[Dict]:
+    """
+    Detailed analysis of reviews impact
+    """
+    if reviews_df is None or len(reviews_df) == 0:
+        return None
+    
+    # Merge orders with reviews
+    merged = orders_df.merge(
+        reviews_df, 
+        left_on='Order_ID', 
+        right_on='Order_ID', 
+        how='left'
+    )
+    
+    # Global metrics
+    avg_rating = reviews_df['Rating'].mean()
+    rating_distribution = reviews_df['Rating'].value_counts().sort_index()
+    
+    # Revenue by rating level
+    revenue_by_rating = merged.groupby('Rating')['Total'].sum().sort_index()
+    
+    # Sentiment analysis
+    sentiment_data = analyze_review_sentiment_detailed(reviews_df)
+    
+    return {
+        'avg_rating': avg_rating,
+        'rating_distribution': rating_distribution,
+        'revenue_by_rating': revenue_by_rating,
+        'sentiment': sentiment_data,
+        'total_reviews': len(reviews_df)
+    }
+
+
+def analyze_review_sentiment_detailed(reviews_df) -> Dict:
+    """
+    Detailed sentiment analysis of review messages
+    """
+    # Positive/negative keywords
+    positive_keywords = [
+        'perfect', 'great', 'love', 'beautiful', 'excellent', 'amazing',
+        'happy', 'recommend', 'fast', 'quality', 'wonderful',
+        'parfait', 'super', 'ravie', 'merci', 'rapide', 'jolie', 
+        'magnifique', 'excellente', 'satisfait'
+    ]
+    
+    negative_keywords = [
+        'disappointed', 'bad', 'broken', 'wrong', 'never', 'poor',
+        'slow', 'terrible', 'waste', 'awful',
+        'déçu', 'problème', 'lent', 'mauvais', 'cassé', 'erreur',
+        'insatisfait', 'nul'
+    ]
+    
+    def classify_sentiment(message):
+        if pd.isna(message) or message == '':
+            return 'neutral'
+        
+        message_lower = str(message).lower()
+        
+        positive_count = sum(1 for word in positive_keywords if word in message_lower)
+        negative_count = sum(1 for word in negative_keywords if word in message_lower)
+        
+        if positive_count > negative_count:
+            return 'positive'
+        elif negative_count > positive_count:
+            return 'negative'
+        else:
+            return 'neutral'
+    
+    reviews_df['sentiment'] = reviews_df['Review_Text'].apply(classify_sentiment)
+    
+    sentiment_counts = reviews_df['sentiment'].value_counts()
+    
+    # Extract frequent keywords
+    all_messages = ' '.join(reviews_df['Review_Text'].dropna().astype(str)).lower()
+    keyword_freq = {}
+    for word in positive_keywords + negative_keywords:
+        keyword_freq[word] = all_messages.count(word)
+    
+    top_keywords = sorted(keyword_freq.items(), key=lambda x: x[1], reverse=True)[:10]
+    top_keywords = [kw for kw in top_keywords if kw[1] > 0]  # Filter out 0 counts
+    
+    return {
+        'distribution': sentiment_counts,
+        'top_keywords': top_keywords
+    }
+
+
+# ==================== VISUALIZATION FUNCTIONS ====================
+
+def plot_rfm_segments(rfm_df: pd.DataFrame) -> go.Figure:
+    """Plot RFM segmentation pie chart"""
+    segment_counts = rfm_df['Segment'].value_counts()
+    
+    colors = {
+        '🏆 Champions': '#27ae60',
+        '💚 Loyal': '#3498db',
+        '🌱 Potential': '#f39c12',
+        '⚠️ At Risk': '#e67e22',
+        '💤 Dormant': '#95a5a6'
+    }
+    
+    fig = go.Figure(data=[go.Pie(
+        labels=segment_counts.index,
+        values=segment_counts.values,
+        marker=dict(colors=[colors.get(seg, '#95a5a6') for seg in segment_counts.index])
+    )])
+    
+    fig.update_layout(
+        title="RFM Customer Segmentation",
+        height=400
+    )
+    
+    return fig
+
+
+def plot_customer_lifetime_distribution(customer_metrics: pd.DataFrame) -> go.Figure:
+    """Plot LTV distribution histogram"""
+    fig = px.histogram(
+        customer_metrics,
+        x='LTV',
+        nbins=30,
+        title='Customer Lifetime Value Distribution',
+        labels={'LTV': 'Lifetime Value ($)', 'count': 'Customers'},
+        color_discrete_sequence=['#3498db']
+    )
+    fig.update_layout(height=400)
+    
+    return fig
+
+
+def plot_repeat_customer_funnel(repeat_data: Dict) -> go.Figure:
+    """Plot repeat customer funnel"""
+    order_dist = repeat_data['order_distribution']
+    
+    # Prepare funnel data (max 5 levels)
+    levels = sorted([k for k in order_dist.keys() if k <= 5])
+    values = [order_dist.get(level, 0) for level in levels]
+    labels = [f"{level} Order{'s' if level > 1 else ''}" for level in levels]
+    
+    fig = go.Figure(go.Funnel(
+        y=labels,
+        x=values,
+        textinfo="value+percent initial",
+        marker=dict(color=['#3498db', '#2ecc71', '#f39c12', '#e74c3c', '#9b59b6'][:len(levels)])
+    ))
+    
+    fig.update_layout(
+        title="Customer Retention Funnel",
+        height=400
+    )
+    
+    return fig
+
+
+def plot_geographic_heatmap(geo_data: Dict) -> go.Figure:
+    """Plot geographic revenue heatmap"""
+    country_df = geo_data['by_country']
+    
+    fig = px.choropleth(
+        country_df,
+        locations='Country',
+        locationmode='country names',
+        color='Revenue',
+        hover_data=['Orders', 'Avg_Basket'],
+        title='Revenue by Country',
+        color_continuous_scale='Blues'
+    )
+    
+    fig.update_layout(height=500)
+    
+    return fig
+
+
 # ==================== SIDEBAR ====================
 with st.sidebar:
     st.markdown("## ⚙️ Filters")
@@ -397,12 +762,47 @@ if reviews_df is not None:
 
 orders_with_delays = calculate_shipping_delays(orders_df)
 
+# ==================== ENRICHED ANALYSES ====================
+# RFM Segmentation
+rfm_analysis = calculate_rfm_analysis(orders_df)
+
+# Detailed customer metrics
+customer_metrics = calculate_detailed_customer_metrics(orders_df)
+
+# VIP customers
+vip_customers, vip_stats = None, None
+if customer_metrics is not None and len(customer_metrics) > 0:
+    try:
+        vip_customers, vip_stats = identify_vip_customers(customer_metrics, percentile=90)
+    except Exception as e:
+        st.sidebar.error(f"Error identifying VIP customers: {str(e)}")
+        vip_customers, vip_stats = None, None
+
+# Retention analysis
+repeat_data = None
+if customer_metrics is not None:
+    repeat_data = analyze_customer_retention_detailed(customer_metrics)
+
+# Churn risk customers
+at_risk = None
+if customer_metrics is not None:
+    at_risk = identify_churn_risk_customers(customer_metrics, days_threshold=90)
+
+# Detailed geography
+geo_data = analyze_geography_detailed(orders_df)
+
+# Detailed reviews analysis
+review_analysis = None
+if reviews_df is not None:
+    review_analysis = analyze_reviews_detailed(orders_df, reviews_df)
+
 # ==================== TABS ====================
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🌍 Customer Profile",
     "⭐ Reviews Analysis",
     "🛒 Purchase Behavior",
     "🔄 Retention & LTV",
+    "🎯 RFM & VIP Analysis",
     "📧 Actionable Insights"
 ])
 
@@ -868,6 +1268,301 @@ with tab4:
             """, unsafe_allow_html=True)
 
 with tab5:
+    st.markdown("## 🎯 RFM Segmentation & VIP Analysis")
+    
+    if rfm_analysis is not None and customer_metrics is not None:
+        # ========== SECTION 1 : MÉTRIQUES CLÉS ==========
+        st.markdown("### 📊 Key Metrics")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                "Total Customers",
+                f"{len(customer_metrics)}",
+                delta=None
+            )
+        
+        with col2:
+            if repeat_data is not None:
+                st.metric(
+                    "Repeat Rate",
+                    f"{repeat_data['repeat_rate']:.1f}%",
+                    delta=None
+                )
+        
+        with col3:
+            st.metric(
+                "Avg Customer LTV",
+                f"${customer_metrics['LTV'].mean():.2f}",
+                delta=None
+            )
+        
+        with col4:
+            if repeat_data is not None:
+                st.metric(
+                    "Avg Days Between Orders",
+                    f"{repeat_data['avg_days_between_orders']:.0f} days",
+                    delta=None
+                )
+        
+        # ========== SECTION 2 : SEGMENTATION RFM ==========
+        st.markdown("---")
+        st.markdown("### 🎯 RFM Segmentation")
+        
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.plotly_chart(plot_rfm_segments(rfm_analysis), use_container_width=True)
+        
+        with col2:
+            st.markdown("**Segment Definitions:**")
+            st.write("🏆 **Champions**: Best customers (buy often, recently, high value)")
+            st.write("💚 **Loyal**: Regular, dependable customers")
+            st.write("🌱 **Potential**: Promising customers to develop")
+            st.write("⚠️ **At Risk**: Previously good customers, now inactive")
+            st.write("💤 **Dormant**: Inactive customers with low engagement")
+        
+        # Segment details
+        with st.expander("📋 Details by Segment"):
+            segment_summary = rfm_analysis.groupby('Segment').agg({
+                'Customer': 'count',
+                'Monetary': ['sum', 'mean'],
+                'Frequency': 'mean',
+                'Recency': 'mean'
+            }).reset_index()
+            
+            segment_summary.columns = ['Segment', 'Count', 'Total Revenue', 'Avg LTV', 'Avg Frequency', 'Avg Recency (days)']
+            st.dataframe(segment_summary, use_container_width=True, hide_index=True)
+        
+        # ========== SECTION 3 : CLIENTS VIP ==========
+        if vip_customers is not None and vip_stats is not None and isinstance(vip_customers, pd.DataFrame) and len(vip_customers) > 0:
+            st.markdown("---")
+            st.markdown("### 👑 VIP Customers (Top 10%)")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric(
+                    "Number of VIPs",
+                    f"{vip_stats['count']}",
+                    delta=None
+                )
+            
+            with col2:
+                st.metric(
+                    "Total VIP Revenue",
+                    f"${vip_stats['total_ca']:.2f}",
+                    delta=None
+                )
+            
+            with col3:
+                st.metric(
+                    "% of Total Revenue",
+                    f"{vip_stats['pct_of_total_ca']:.1f}%",
+                    delta=None
+                )
+            
+            with col4:
+                st.metric(
+                    "Avg VIP LTV",
+                    f"${vip_stats['avg_ltv']:.2f}",
+                    delta=None
+                )
+            
+            # VIP list
+            with st.expander("📋 VIP Customer List"):
+                try:
+                    vip_display = vip_customers[['Customer', 'LTV', 'Num_Orders', 'Avg_Order']].head(20)
+                    vip_display.columns = ['Customer', 'LTV ($)', 'Orders', 'Avg Basket ($)']
+                    vip_display['LTV ($)'] = vip_display['LTV ($)'].round(2)
+                    vip_display['Avg Basket ($)'] = vip_display['Avg Basket ($)'].round(2)
+                    st.dataframe(vip_display, use_container_width=True, hide_index=True)
+                except Exception as e:
+                    st.error(f"Error displaying VIP customers: {str(e)}")
+                    st.write(f"Type of vip_customers: {type(vip_customers)}")
+                    st.write(f"Length: {len(vip_customers) if hasattr(vip_customers, '__len__') else 'N/A'}")
+                    if isinstance(vip_customers, pd.DataFrame):
+                        st.write(f"Columns: {vip_customers.columns.tolist()}")
+        
+        # ========== SECTION 4 : FIDÉLISATION ==========
+        if repeat_data is not None:
+            st.markdown("---")
+            st.markdown("### 💚 Retention Analysis")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.plotly_chart(plot_repeat_customer_funnel(repeat_data), use_container_width=True)
+            
+            with col2:
+                st.plotly_chart(plot_customer_lifetime_distribution(customer_metrics), use_container_width=True)
+            
+            # Statistics
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                first_time = repeat_data['order_distribution'].get(1, 0)
+                st.metric(
+                    "First-Time Customers",
+                    f"{first_time}",
+                    delta=f"{(1 - repeat_data['repeat_rate']/100)*100:.0f}% of customers"
+                )
+            
+            with col2:
+                st.metric(
+                    "Repeat Customers",
+                    f"{repeat_data['repeat_customers']}",
+                    delta=f"{repeat_data['repeat_rate']:.1f}% of customers"
+                )
+            
+            with col3:
+                best_customer = customer_metrics.nlargest(1, 'Num_Orders').iloc[0]
+                st.metric(
+                    "Most Orders (Record)",
+                    f"{int(best_customer['Num_Orders'])} orders",
+                    delta=f"LTV: ${best_customer['LTV']:.2f}"
+                )
+        
+        # ========== SECTION 5 : RISQUE CHURN ==========
+        if at_risk is not None and isinstance(at_risk, pd.DataFrame):
+            st.markdown("---")
+            st.markdown("### ⚠️ Customers at Risk of Churn")
+            
+            if len(at_risk) > 0:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.metric(
+                        "Customers at Risk",
+                        f"{len(at_risk)}",
+                        delta=f"{len(at_risk)/len(customer_metrics)*100:.1f}% of customers",
+                        delta_color="inverse"
+                    )
+                
+                with col2:
+                    st.metric(
+                        "Potential Lost Revenue",
+                        f"${at_risk['LTV'].sum():.2f}",
+                        delta="Need to reactivate!",
+                        delta_color="inverse"
+                    )
+                
+                # At-risk customer list
+                st.markdown("**Top 10 At-Risk Customers (by LTV):**")
+                at_risk_display = at_risk[['Customer', 'LTV', 'Num_Orders', 'Days_Since_Last_Order']].head(10)
+                at_risk_display.columns = ['Customer', 'LTV ($)', 'Orders', 'Days Inactive']
+                at_risk_display['LTV ($)'] = at_risk_display['LTV ($)'].round(2)
+                st.dataframe(at_risk_display, use_container_width=True, hide_index=True)
+                
+                # Recommendations
+                with st.expander("💡 Reactivation Recommendations"):
+                    st.write("**Suggested Actions:**")
+                    st.write("1. 📧 Re-engagement email with 10-15% coupon code")
+                    st.write("2. 🎁 Exclusive 'We miss you' offer")
+                    st.write("3. 📱 Personalized message reminding them of their last purchase")
+                    st.write("4. ⭐ Request a review if they haven't left one (engagement)")
+            else:
+                st.success("✅ No customers at risk of churn detected!")
+        
+        # ========== SECTION 6 : GÉOGRAPHIE DÉTAILLÉE ==========
+        if geo_data is not None:
+            st.markdown("---")
+            st.markdown("### 🌍 Geographic Analysis")
+            
+            st.plotly_chart(plot_geographic_heatmap(geo_data), use_container_width=True)
+            
+            # Details by country
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Top 10 Countries by Revenue:**")
+                top_countries = geo_data['by_country'].nlargest(10, 'Revenue')
+                top_countries_display = top_countries.copy()
+                top_countries_display['Revenue'] = top_countries_display['Revenue'].round(2)
+                top_countries_display['Avg_Basket'] = top_countries_display['Avg_Basket'].round(2)
+                st.dataframe(top_countries_display, use_container_width=True, hide_index=True)
+            
+            with col2:
+                if geo_data['by_city'] is not None:
+                    st.markdown("**Top 10 Cities:**")
+                    city_display = geo_data['by_city'].head(10).copy()
+                    city_display['Revenue'] = city_display['Revenue'].round(2)
+                    st.dataframe(city_display, use_container_width=True, hide_index=True)
+        
+        # ========== SECTION 7 : AVIS CLIENTS DÉTAILLÉS ==========
+        if review_analysis is not None:
+            st.markdown("---")
+            st.markdown("### ⭐ Detailed Reviews Analysis")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric(
+                    "Average Rating",
+                    f"{review_analysis['avg_rating']:.2f}/5",
+                    delta=None
+                )
+            
+            with col2:
+                st.metric(
+                    "Total Reviews",
+                    f"{review_analysis['total_reviews']}",
+                    delta=None
+                )
+            
+            with col3:
+                sentiment_dist = review_analysis['sentiment']['distribution']
+                total_reviews = review_analysis['total_reviews']
+                sentiment_pct = sentiment_dist.get('positive', 0) / total_reviews * 100 if total_reviews > 0 else 0
+                st.metric(
+                    "% Positive Reviews",
+                    f"{sentiment_pct:.1f}%",
+                    delta=None
+                )
+            
+            # Charts
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Rating distribution
+                rating_dist = review_analysis['rating_distribution']
+                fig_rating = go.Figure(data=[go.Bar(
+                    x=rating_dist.index,
+                    y=rating_dist.values,
+                    marker_color='#3498db'
+                )])
+                fig_rating.update_layout(
+                    title="Rating Distribution",
+                    xaxis_title="Stars",
+                    yaxis_title="Count",
+                    height=400
+                )
+                st.plotly_chart(fig_rating, use_container_width=True)
+            
+            with col2:
+                # Sentiment distribution
+                sentiment_dist = review_analysis['sentiment']['distribution']
+                fig_sentiment = go.Figure(data=[go.Pie(
+                    labels=sentiment_dist.index,
+                    values=sentiment_dist.values,
+                    marker=dict(colors=['#27ae60', '#95a5a6', '#e74c3c'])
+                )])
+                fig_sentiment.update_layout(title="Review Sentiment", height=400)
+                st.plotly_chart(fig_sentiment, use_container_width=True)
+            
+            # Frequent keywords
+            top_keywords = review_analysis['sentiment']['top_keywords']
+            if top_keywords:
+                with st.expander("🔑 Frequent Keywords in Reviews"):
+                    st.write("**Top 10 keywords:**")
+                    for word, count in top_keywords:
+                        st.write(f"- **{word}** : {count} occurrences")
+    
+    else:
+        st.info("⚠️ Not enough data for RFM analysis. Upload more orders to see detailed segmentation.")
+
+with tab6:
     st.markdown("## 📧 Actionable Insights & Recommendations")
     
     if is_premium:

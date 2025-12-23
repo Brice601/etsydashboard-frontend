@@ -1,14 +1,14 @@
 """
-💰 Finance Pro Dashboard v3.0 - COMPLETE EDITION
+💰 Finance Pro Dashboard v3.1 - ENRICHED EDITION
 Real profit tracking after ALL Etsy fees with advanced analytics
 
-New in v3.0:
-✅ Centralized data loading from session_state
-✅ Coupons & Promos analysis (ROI, impact on margin)
-✅ Real Etsy fees validation (Payments CSV)
-✅ Product variations financial analysis
-✅ Geographic analysis (revenue by country)
-✅ SKU rotation & stock management
+New in v3.1:
+✅ Real Etsy fees from EtsyDirectCheckoutPayments.csv
+✅ Net margin calculation with actual costs
+✅ Enhanced promo code ROI analysis
+✅ Product profitability with real fees per item
+✅ Shipping profitability analysis
+✅ Fee breakdown visualization
 """
 
 import streamlit as st
@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 
 # ==================== PAGE CONFIGURATION ====================
 st.set_page_config(
-    page_title="Finance Pro v3.0 - Etsy Dashboard",
+    page_title="Finance Pro v3.1 - Etsy Dashboard",
     page_icon="💰",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -48,7 +48,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# ==================== DATA LOADING ====================
+# ==================== DATA LOADING FUNCTIONS ====================
 
 def check_data_availability():
     """Check if required data is available in session_state"""
@@ -120,6 +120,41 @@ def load_and_prepare_data(sold_items_df, payments_df=None):
     return df
 
 
+def load_etsy_payments(payments_df):
+    """Process EtsyDirectCheckoutPayments data"""
+    if payments_df is None:
+        return None
+    
+    df = payments_df.copy()
+    
+    # Column mapping
+    column_mapping = {
+        'N° du paiement': 'Payment_ID',
+        'Commande n°': 'Order_ID',
+        'Montant brut': 'Gross_Amount',
+        'Frais': 'Fees',
+        'Montant net': 'Net_Amount',
+        'Montant de TVA': 'VAT',
+        'Date de la commande': 'Order_Date'
+    }
+    
+    for old_col, new_col in column_mapping.items():
+        if old_col in df.columns:
+            df.rename(columns={old_col: new_col}, inplace=True)
+    
+    # Convert types
+    if 'Order_Date' in df.columns:
+        df['Order_Date'] = pd.to_datetime(df['Order_Date'], errors='coerce')
+    
+    for col in ['Fees', 'Gross_Amount', 'Net_Amount', 'VAT']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    
+    return df
+
+
+# ==================== CALCULATION FUNCTIONS ====================
+
 def calculate_etsy_fees_detailed(price, shipping=0, quantity=1, fees_config=None):
     """Calculate ALL Etsy fees"""
     if fees_config is None:
@@ -162,7 +197,97 @@ def calculate_etsy_fees_detailed(price, shipping=0, quantity=1, fees_config=None
     }
 
 
-def calculate_kpis(df, fees_config=None):
+def calculate_real_etsy_fees(payments_df):
+    """Calculate REAL Etsy fees from EtsyDirectCheckoutPayments"""
+    if payments_df is None or len(payments_df) == 0:
+        return None
+    
+    fees_breakdown = {
+        'total_fees': payments_df['Fees'].sum(),
+        'avg_fee_per_transaction': payments_df['Fees'].mean(),
+        'total_gross': payments_df['Gross_Amount'].sum(),
+        'total_net': payments_df['Net_Amount'].sum(),
+        'effective_fee_rate': (payments_df['Fees'].sum() / payments_df['Gross_Amount'].sum()) * 100 if payments_df['Gross_Amount'].sum() > 0 else 0,
+        'total_vat': payments_df['VAT'].sum() if 'VAT' in payments_df.columns else 0,
+        'transactions_count': len(payments_df)
+    }
+    
+    return fees_breakdown
+
+
+def calculate_net_margin(df, payments_df):
+    """Calculate TRUE net margin with real fees"""
+    ca_total = df['Price'].sum()
+    
+    # Real Etsy fees if available
+    if payments_df is not None and 'Fees' in payments_df.columns:
+        frais_etsy = payments_df['Fees'].sum()
+    else:
+        # Fallback to estimated fees
+        frais_etsy = sum([calculate_etsy_fees_detailed(row['Price'], row.get('Shipping', 0))['total'] 
+                         for _, row in df.iterrows()])
+    
+    # Discounts
+    total_discounts = df['Discount_Amount'].sum() + df['Shipping_Discount'].sum()
+    
+    # Net margin
+    marge_nette = ca_total - frais_etsy - total_discounts
+    taux_marge_nette = (marge_nette / ca_total * 100) if ca_total > 0 else 0
+    
+    return {
+        'ca_total': ca_total,
+        'frais_etsy': frais_etsy,
+        'total_discounts': total_discounts,
+        'marge_nette': marge_nette,
+        'taux_marge_nette': taux_marge_nette
+    }
+
+
+def calculate_product_profitability(df, payments_df):
+    """Calculate REAL profitability per product"""
+    if payments_df is None or 'Order_ID' not in df.columns or 'Order_ID' not in payments_df.columns:
+        # Fallback without real fees
+        product_profit = df.groupby('Product').agg({
+            'Price': 'sum',
+            'Quantity': 'sum'
+        }).reset_index()
+        product_profit.columns = ['Product', 'Revenue', 'Units_Sold']
+        
+        # Estimate fees
+        product_profit['Fees'] = product_profit['Revenue'] * 0.10  # ~10% estimate
+        product_profit['Net_Margin'] = product_profit['Revenue'] - product_profit['Fees']
+        product_profit['Net_Margin_Pct'] = (product_profit['Net_Margin'] / product_profit['Revenue'] * 100)
+        
+        return product_profit.sort_values('Net_Margin', ascending=False)
+    
+    # Merge with real fees
+    merged = df.merge(
+        payments_df[['Order_ID', 'Fees', 'Gross_Amount']], 
+        on='Order_ID', 
+        how='left'
+    )
+    
+    # Calculate proportional fees per item
+    merged['Item_Fees'] = (merged['Price'] / merged['Gross_Amount']) * merged['Fees']
+    merged['Item_Fees'] = merged['Item_Fees'].fillna(0)
+    
+    # Group by product
+    product_profit = merged.groupby('Product').agg({
+        'Price': 'sum',
+        'Item_Fees': 'sum',
+        'Quantity': 'sum'
+    }).reset_index()
+    
+    product_profit.columns = ['Product', 'Revenue', 'Fees', 'Units_Sold']
+    
+    # Calculate net margin
+    product_profit['Net_Margin'] = product_profit['Revenue'] - product_profit['Fees']
+    product_profit['Net_Margin_Pct'] = (product_profit['Net_Margin'] / product_profit['Revenue'] * 100)
+    
+    return product_profit.sort_values('Net_Margin', ascending=False)
+
+
+def calculate_kpis(df, fees_config=None, payments_df=None):
     """Calculate all KPIs"""
     kpis = {}
     
@@ -170,22 +295,29 @@ def calculate_kpis(df, fees_config=None):
     kpis['num_sales'] = len(df)
     kpis['avg_order_value'] = kpis['total_revenue'] / kpis['num_sales'] if kpis['num_sales'] > 0 else 0
     
-    # Etsy fees
-    total_fees = 0
-    fees_breakdown = {}
-    
-    for _, row in df.iterrows():
-        fees_result = calculate_etsy_fees_detailed(
-            row['Price'], row.get('Shipping', 0),
-            row.get('Quantity', 1), fees_config
-        )
-        total_fees += fees_result['total']
+    # Use real fees if available
+    if payments_df is not None and 'Fees' in payments_df.columns:
+        kpis['etsy_fees'] = payments_df['Fees'].sum()
+        fees_breakdown = calculate_real_etsy_fees(payments_df)
+        if fees_breakdown:
+            kpis['etsy_fees_detail'] = fees_breakdown
+    else:
+        # Fallback to estimated fees
+        total_fees = 0
+        fees_breakdown = {}
         
-        for fee_type, amount in fees_result['detail'].items():
-            fees_breakdown[fee_type] = fees_breakdown.get(fee_type, 0) + amount
-    
-    kpis['etsy_fees'] = total_fees
-    kpis['etsy_fees_detail'] = fees_breakdown
+        for _, row in df.iterrows():
+            fees_result = calculate_etsy_fees_detailed(
+                row['Price'], row.get('Shipping', 0),
+                row.get('Quantity', 1), fees_config
+            )
+            total_fees += fees_result['total']
+            
+            for fee_type, amount in fees_result['detail'].items():
+                fees_breakdown[fee_type] = fees_breakdown.get(fee_type, 0) + amount
+        
+        kpis['etsy_fees'] = total_fees
+        kpis['etsy_fees_detail'] = fees_breakdown
     
     # Discounts
     kpis['total_discounts'] = df['Discount_Amount'].sum() + df['Shipping_Discount'].sum()
@@ -203,259 +335,327 @@ def analyze_coupons(df):
     if 'Coupon_Code' not in df.columns:
         return None
     
-    # Filter sales with coupons
-    coupon_sales = df[df['Coupon_Code'].notna() & (df['Coupon_Code'] != '')]
+    coupons_used = df[df['Coupon_Code'].notna()]
     
-    if len(coupon_sales) == 0:
+    if len(coupons_used) == 0:
         return None
     
-    coupon_analysis = coupon_sales.groupby('Coupon_Code').agg({
+    coupon_stats = coupons_used.groupby('Coupon_Code').agg({
         'Price': 'sum',
         'Discount_Amount': 'sum',
-        'Quantity': 'count'
+        'Order_ID': 'count'
     }).reset_index()
     
-    coupon_analysis.columns = ['Coupon', 'Revenue', 'Discount_Given', 'Sales']
-    coupon_analysis['ROI'] = ((coupon_analysis['Revenue'] - coupon_analysis['Discount_Given']) / 
-                               coupon_analysis['Discount_Given']) * 100
-    coupon_analysis['Avg_Discount'] = coupon_analysis['Discount_Given'] / coupon_analysis['Sales']
+    coupon_stats.columns = ['Coupon', 'Revenue', 'Discount_Given', 'Sales']
     
-    coupon_analysis = coupon_analysis.sort_values('Revenue', ascending=False)
+    # Calculate ROI
+    coupon_stats['ROI'] = ((coupon_stats['Revenue'] - coupon_stats['Discount_Given']) / 
+                           coupon_stats['Discount_Given'] * 100)
+    coupon_stats['Avg_Discount'] = coupon_stats['Discount_Given'] / coupon_stats['Sales']
     
-    return coupon_analysis
+    return coupon_stats.sort_values('ROI', ascending=False)
 
 
-def analyze_geography(df):
+def analyze_geographic(df):
     """Analyze revenue by country"""
     if 'Country' not in df.columns:
         return None
     
-    geo_analysis = df.groupby('Country').agg({
-        'Price': ['sum', 'mean', 'count'],
-        'Shipping': 'mean'
+    geo_stats = df.groupby('Country').agg({
+        'Price': 'sum',
+        'Order_ID': 'count'
     }).reset_index()
     
-    geo_analysis.columns = ['Country', 'Revenue', 'Avg_Order', 'Sales', 'Avg_Shipping']
-    geo_analysis = geo_analysis.sort_values('Revenue', ascending=False)
+    geo_stats.columns = ['Country', 'Revenue', 'Sales']
     
-    # Calculate net revenue (after shipping costs)
-    geo_analysis['Net_Revenue'] = geo_analysis['Revenue'] - (geo_analysis['Avg_Shipping'] * geo_analysis['Sales'])
-    
-    return geo_analysis
+    return geo_stats.sort_values('Revenue', ascending=False)
 
 
 def analyze_variations(df):
-    """Analyze product variations performance"""
-    if 'Variations' not in df.columns:
+    """Analyze product variations"""
+    if 'Variations' not in df.columns or df['Variations'].isna().all():
         return None
     
-    # Filter rows with variations
-    var_df = df[df['Variations'].notna() & (df['Variations'] != '')]
+    variations = df[df['Variations'].notna()]
     
-    if len(var_df) == 0:
+    if len(variations) == 0:
         return None
     
-    # Parse variations (simplified)
-    def parse_variation(var_string):
-        try:
-            # "Taille:1 Moyen : 17 - 20 cm,Color:Bleu" -> "Moyen, Bleu"
-            parts = str(var_string).split(',')
-            parsed = []
-            for part in parts:
-                if ':' in part:
-                    # Take the part after first colon
-                    value = part.split(':', 1)[1].strip()
-                    parsed.append(value)
-            return ' | '.join(parsed) if parsed else var_string
-        except:
-            return str(var_string)
-    
-    var_df['Parsed_Variation'] = var_df['Variations'].apply(parse_variation)
-    
-    variation_analysis = var_df.groupby('Parsed_Variation').agg({
+    var_stats = variations.groupby('Variations').agg({
         'Price': 'sum',
         'Quantity': 'sum'
     }).reset_index()
     
-    variation_analysis.columns = ['Variation', 'Revenue', 'Sales']
-    variation_analysis = variation_analysis.sort_values('Revenue', ascending=False).head(10)
+    var_stats.columns = ['Variation', 'Revenue', 'Sales']
     
-    return variation_analysis
+    return var_stats.sort_values('Revenue', ascending=False).head(10)
 
 
 def analyze_sku_rotation(df):
-    """Analyze SKU stock rotation"""
-    if 'SKU' not in df.columns:
+    """Analyze SKU rotation rate"""
+    if 'SKU' not in df.columns or df['SKU'].isna().all():
         return None
     
-    # Filter rows with SKU
-    sku_df = df[df['SKU'].notna() & (df['SKU'] != '')]
+    skus = df[df['SKU'].notna()].copy()
     
-    if len(sku_df) == 0:
+    if len(skus) == 0:
         return None
     
-    sku_analysis = sku_df.groupby('SKU').agg({
-        'Quantity': 'sum',
-        'Date': lambda x: (x.max() - x.min()).days if len(x) > 1 else 30
+    # Calculate days range
+    date_range = (skus['Date'].max() - skus['Date'].min()).days
+    months = max(date_range / 30, 1)
+    
+    sku_stats = skus.groupby('SKU').agg({
+        'Quantity': 'sum'
     }).reset_index()
     
-    sku_analysis.columns = ['SKU', 'Total_Sales', 'Days_Active']
+    sku_stats.columns = ['SKU', 'Units_Sold']
+    sku_stats['Rotation_Rate'] = sku_stats['Units_Sold'] / months
     
-    # Calculate rotation rate (sales per month)
-    sku_analysis['Rotation_Rate'] = (sku_analysis['Total_Sales'] / 
-                                      sku_analysis['Days_Active'] * 30)
-    
-    # Flag slow-moving items
-    sku_analysis['Status'] = sku_analysis['Rotation_Rate'].apply(
-        lambda x: '🔴 Slow' if x < 1 else ('🟡 Medium' if x < 5 else '🟢 Fast')
+    # Classify rotation speed
+    sku_stats['Status'] = sku_stats['Rotation_Rate'].apply(
+        lambda x: '🟢 Fast' if x >= 5 else ('🟡 Medium' if x >= 2 else '🔴 Slow')
     )
     
-    sku_analysis = sku_analysis.sort_values('Rotation_Rate', ascending=True)
+    return sku_stats.sort_values('Rotation_Rate', ascending=False)
+
+
+# ==================== VISUALIZATION FUNCTIONS ====================
+
+def plot_fees_breakdown_donut(fees_data):
+    """Donut chart for fee breakdown"""
+    if isinstance(fees_data, dict) and 'total_fees' in fees_data:
+        # From real payments data
+        labels = ['Etsy Fees', 'Net Amount']
+        values = [fees_data['total_fees'], fees_data['total_net']]
+        colors = ['#e74c3c', '#27ae60']
+    else:
+        # From estimated fees
+        labels = list(fees_data.keys())
+        values = list(fees_data.values())
+        colors = px.colors.qualitative.Set3
     
-    return sku_analysis
+    fig = go.Figure(data=[go.Pie(
+        labels=labels,
+        values=values,
+        hole=0.4,
+        marker=dict(colors=colors)
+    )])
+    
+    fig.update_layout(
+        title="Fee Breakdown",
+        height=350,
+        showlegend=True
+    )
+    
+    return fig
 
 
-def validate_fees_with_payments(df, payments_df):
-    """Compare estimated vs real Etsy fees"""
-    if payments_df is None or len(payments_df) == 0:
+def plot_fees_evolution(payments_df):
+    """Line chart showing fees evolution over time"""
+    if payments_df is None or 'Order_Date' not in payments_df.columns:
         return None
     
-    # Merge by Order ID
-    merged = df.merge(
-        payments_df[['Order_ID', 'Fees_Real']],
-        on='Order_ID',
-        how='left'
+    daily_fees = payments_df.groupby(payments_df['Order_Date'].dt.date).agg({
+        'Fees': 'sum',
+        'Gross_Amount': 'sum'
+    }).reset_index()
+    
+    daily_fees['Fee_Rate'] = (daily_fees['Fees'] / daily_fees['Gross_Amount'] * 100)
+    
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatter(
+        x=daily_fees['Order_Date'],
+        y=daily_fees['Fee_Rate'],
+        mode='lines+markers',
+        name='Fee Rate',
+        line=dict(color='#e74c3c', width=2)
+    ))
+    
+    fig.update_layout(
+        title="Effective Fee Rate Evolution (%)",
+        xaxis_title="Date",
+        yaxis_title="Fee Rate (%)",
+        height=350
     )
     
-    # Calculate estimated fees
-    merged['Fees_Estimated'] = merged.apply(
-        lambda row: calculate_etsy_fees_detailed(row['Price'])['total'],
-        axis=1
-    )
-    
-    # Compare
-    merged['Fee_Gap'] = merged['Fees_Real'] - merged['Fees_Estimated']
-    merged['Fee_Gap_Pct'] = (merged['Fee_Gap'] / merged['Fees_Estimated'] * 100)
-    
-    validation = {
-        'total_estimated': merged['Fees_Estimated'].sum(),
-        'total_real': merged['Fees_Real'].sum(),
-        'gap': merged['Fee_Gap'].sum(),
-        'gap_pct': (merged['Fee_Gap'].sum() / merged['Fees_Estimated'].sum() * 100)
-    }
-    
-    return validation
+    return fig
 
 
-# ==================== SIDEBAR: FEES CONFIGURATOR ====================
-with st.sidebar:
-    st.markdown("## ⚙️ Fees Configuration")
+def plot_product_profitability_bars(product_profit):
+    """Horizontal bar chart for product profitability"""
+    top_products = product_profit.head(10)
     
-    fees_mode = st.selectbox(
-        "Calculation Mode",
-        ["Quick Estimation (12%)", "Detailed Configurator"],
-        help="Choose how to calculate Etsy fees"
+    fig = go.Figure()
+    
+    fig.add_trace(go.Bar(
+        y=top_products['Product'],
+        x=top_products['Net_Margin'],
+        orientation='h',
+        marker=dict(
+            color=top_products['Net_Margin'],
+            colorscale='RdYlGn',
+            showscale=True
+        ),
+        text=top_products['Net_Margin'].apply(lambda x: f"${x:.2f}"),
+        textposition='auto'
+    ))
+    
+    fig.update_layout(
+        title="Top 10 Products by Net Margin",
+        xaxis_title="Net Margin ($)",
+        yaxis_title="Product",
+        height=400,
+        yaxis={'categoryorder': 'total ascending'}
     )
     
-    fees_config = {'mode': 'quick'}
-    
-    if fees_mode == "Detailed Configurator":
-        st.markdown("### 📊 Detailed Settings")
-        fees_config['mode'] = 'detailed'
-        
-        use_offsite = st.checkbox("Offsite Ads Enabled", value=False)
-        if use_offsite:
-            fees_config['use_offsite_ads'] = True
-            fees_config['offsite_ads_rate'] = st.slider("Offsite Ads Rate", 0.12, 0.15, 0.15, 0.01)
-        
-        etsy_ads = st.number_input("Monthly Etsy Ads Budget ($)", min_value=0, value=0, step=10)
-        if etsy_ads > 0:
-            fees_config['etsy_ads_budget'] = etsy_ads
-        
-        has_plus = st.checkbox("Etsy Plus Subscriber ($10/month)", value=False)
-        if has_plus:
-            fees_config['has_etsy_plus'] = True
-        
-        expected_sales = st.number_input("Expected Monthly Sales", min_value=1, value=30, step=5)
-        fees_config['expected_monthly_sales'] = expected_sales
+    return fig
+
 
 # ==================== MAIN APP ====================
 
-st.markdown('<h1 class="main-header">💰 Finance Pro Dashboard v3.0</h1>', unsafe_allow_html=True)
+st.markdown('<p class="main-header">💰 Finance Pro Dashboard v3.1</p>', unsafe_allow_html=True)
 
 # Check data availability
 check_data_availability()
 
-# Load data
-df = load_and_prepare_data(
-    st.session_state['sold_items_df'],
-    st.session_state.get('payments_df')
+# Load data from session_state
+df = load_and_prepare_data(st.session_state['sold_items_df'])
+
+# Load payments data if available
+payments_df = None
+if 'payments_df' in st.session_state and st.session_state['payments_df'] is not None:
+    payments_df = load_etsy_payments(st.session_state['payments_df'])
+
+# ==================== SIDEBAR - FILTERS & CONFIG ====================
+
+st.sidebar.markdown("### ⚙️ Configuration")
+
+# Date filter
+date_range = st.sidebar.date_input(
+    "Date Range",
+    value=(df['Date'].min(), df['Date'].max()),
+    min_value=df['Date'].min(),
+    max_value=df['Date'].max()
 )
 
-# Calculate KPIs
-kpis = calculate_kpis(df, fees_config)
+if len(date_range) == 2:
+    df = df[(df['Date'].dt.date >= date_range[0]) & (df['Date'].dt.date <= date_range[1])]
+    if payments_df is not None and 'Order_Date' in payments_df.columns:
+        payments_df = payments_df[(payments_df['Order_Date'].dt.date >= date_range[0]) & 
+                                 (payments_df['Order_Date'].dt.date <= date_range[1])]
 
-# Additional analyses
+# Fee configuration
+st.sidebar.markdown("### 💳 Fee Calculator")
+fees_mode = st.sidebar.radio("Mode", ["Quick Estimate", "Detailed"])
+
+fees_config = {'mode': 'quick' if fees_mode == "Quick Estimate" else 'detailed'}
+
+if fees_mode == "Detailed":
+    fees_config['use_offsite_ads'] = st.sidebar.checkbox("Use Offsite Ads", value=False)
+    if fees_config['use_offsite_ads']:
+        fees_config['offsite_ads_rate'] = st.sidebar.slider("Offsite Ads Rate", 0.12, 0.15, 0.15, 0.01)
+    
+    fees_config['etsy_ads_budget'] = st.sidebar.number_input("Monthly Etsy Ads Budget ($)", 0, 1000, 0)
+    fees_config['has_etsy_plus'] = st.sidebar.checkbox("Etsy Plus Subscription", value=False)
+    fees_config['expected_monthly_sales'] = st.sidebar.number_input("Expected Monthly Sales", 1, 1000, 30)
+
+# ==================== CALCULATE KPIs ====================
+
+kpis = calculate_kpis(df, fees_config, payments_df)
+margin_data = calculate_net_margin(df, payments_df)
 coupon_analysis = analyze_coupons(df)
-geo_analysis = analyze_geography(df)
+geo_analysis = analyze_geographic(df)
 variation_analysis = analyze_variations(df)
 sku_analysis = analyze_sku_rotation(df)
+product_profitability = calculate_product_profitability(df, payments_df)
+
+# ==================== MAIN DASHBOARD ====================
+
+# Real fees indicator
+if payments_df is not None:
+    st.success("✅ Using REAL Etsy fees from EtsyDirectCheckoutPayments.csv")
+else:
+    st.info("ℹ️ Using estimated fees. Upload EtsyDirectCheckoutPayments.csv for real fees.")
+
+# Top metrics
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    st.metric(
+        "Total Revenue",
+        f"${kpis['total_revenue']:,.2f}",
+        delta=None
+    )
+
+with col2:
+    st.metric(
+        "Etsy Fees",
+        f"${kpis['etsy_fees']:,.2f}",
+        delta=f"-{(kpis['etsy_fees']/kpis['total_revenue']*100):.1f}%",
+        delta_color="inverse"
+    )
+
+with col3:
+    st.metric(
+        "Net Margin",
+        f"${margin_data['marge_nette']:,.2f}",
+        delta=f"{margin_data['taux_marge_nette']:.1f}%"
+    )
+
+with col4:
+    st.metric(
+        "Total Sales",
+        f"{kpis['num_sales']:,}",
+        delta=f"${kpis['avg_order_value']:.2f} avg"
+    )
+
+st.markdown("---")
 
 # ==================== TABS ====================
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📊 Overview",
-    "💸 Coupons & Promos",
+
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📊 Overview", 
+    "💸 Coupons & Promos", 
     "🌍 Geographic & Variations",
-    "📦 SKU & Stock"
+    "📦 SKU Analysis",
+    "🏆 Product Profitability"
 ])
 
 with tab1:
     st.markdown("## 📊 Financial Overview")
     
-    # KPI Cards
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2 = st.columns(2)
     
     with col1:
-        st.metric("Total Revenue", f"${kpis['total_revenue']:,.2f}")
-    with col2:
-        st.metric("Etsy Fees", f"${kpis['etsy_fees']:,.2f}",
-                 delta=f"-{(kpis['etsy_fees'] / kpis['total_revenue'] * 100):.1f}%",
-                 delta_color="inverse")
-    with col3:
-        st.metric("Discounts", f"${kpis['total_discounts']:,.2f}",
-                 delta=f"-{kpis['discount_rate']:.1f}%",
-                 delta_color="inverse")
-    with col4:
-        st.metric("Net Profit", f"${kpis['gross_margin']:,.2f}",
-                 delta=f"{kpis['margin_percent']:.1f}% margin")
-    
-    st.markdown("---")
-    
-    # Fees breakdown
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.markdown("### 💸 Fees Breakdown")
-        fees_data = []
-        for fee_type, amount in kpis['etsy_fees_detail'].items():
-            fees_data.append({
-                'Category': fee_type,
-                'Amount': f"${amount:.2f}",
-                'Percentage': f"{(amount / kpis['total_revenue'] * 100):.2f}%"
-            })
+        # Fee breakdown
+        st.markdown("### 💳 Fee Structure")
         
-        fees_df = pd.DataFrame(fees_data)
-        st.dataframe(fees_df, use_container_width=True, hide_index=True)
+        if payments_df is not None:
+            real_fees = calculate_real_etsy_fees(payments_df)
+            if real_fees:
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.metric("Effective Fee Rate", f"{real_fees['effective_fee_rate']:.1f}%")
+                with col_b:
+                    st.metric("Avg Fee/Transaction", f"${real_fees['avg_fee_per_transaction']:.2f}")
+                
+                st.plotly_chart(plot_fees_breakdown_donut(real_fees), use_container_width=True)
+        else:
+            st.plotly_chart(plot_fees_breakdown_donut(kpis.get('etsy_fees_detail', {})), use_container_width=True)
     
     with col2:
-        # Revenue distribution pie
+        # Revenue distribution
+        st.markdown("### 💰 Revenue Breakdown")
+        
         fig_pie = go.Figure(data=[go.Pie(
-            labels=['Net Profit', 'Etsy Fees', 'Discounts'],
-            values=[kpis['gross_margin'], kpis['etsy_fees'], kpis['total_discounts']],
+            labels=['Net Margin', 'Etsy Fees', 'Discounts'],
+            values=[margin_data['marge_nette'], kpis['etsy_fees'], kpis['total_discounts']],
             hole=0.4,
             marker=dict(colors=['#27ae60', '#e74c3c', '#f39c12'])
         )])
-        fig_pie.update_layout(title="Revenue Distribution", height=300)
+        fig_pie.update_layout(title="Where Does Your Money Go?", height=350)
         st.plotly_chart(fig_pie, use_container_width=True)
     
     # Revenue over time
@@ -467,6 +667,13 @@ with tab1:
     fig_time.update_traces(line_color='#27ae60', line_width=3)
     fig_time.update_layout(height=400)
     st.plotly_chart(fig_time, use_container_width=True)
+    
+    # Fee evolution (if real data available)
+    if payments_df is not None:
+        st.markdown("### 📉 Fee Rate Evolution")
+        fee_chart = plot_fees_evolution(payments_df)
+        if fee_chart:
+            st.plotly_chart(fee_chart, use_container_width=True)
 
 with tab2:
     st.markdown("## 💸 Coupons & Promotions Analysis")
@@ -635,6 +842,63 @@ with tab4:
     else:
         st.info("ℹ️ SKU data not available. Add SKU column to your CSV to track stock rotation.")
 
+with tab5:
+    st.markdown("## 🏆 Product Profitability Analysis")
+    
+    if product_profitability is not None and len(product_profitability) > 0:
+        # Summary metrics
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            best_product = product_profitability.iloc[0]
+            st.metric("Best Product", best_product['Product'][:20] + "...", 
+                     f"${best_product['Net_Margin']:.2f}")
+        
+        with col2:
+            avg_margin = product_profitability['Net_Margin_Pct'].mean()
+            st.metric("Avg Margin", f"{avg_margin:.1f}%")
+        
+        with col3:
+            unprofitable = len(product_profitability[product_profitability['Net_Margin'] < 0])
+            st.metric("Unprofitable Products", unprofitable, 
+                     delta_color="inverse" if unprofitable > 0 else "normal")
+        
+        st.markdown("---")
+        
+        # Visualization
+        st.plotly_chart(plot_product_profitability_bars(product_profitability), use_container_width=True)
+        
+        # Detailed table
+        st.markdown("### 📋 Detailed Product Analysis")
+        
+        display_df = product_profitability[['Product', 'Revenue', 'Fees', 'Net_Margin', 'Net_Margin_Pct', 'Units_Sold']].copy()
+        display_df.columns = ['Product', 'Revenue ($)', 'Fees ($)', 'Net Margin ($)', 'Margin (%)', 'Units Sold']
+        
+        # Format numbers
+        display_df['Revenue ($)'] = display_df['Revenue ($)'].apply(lambda x: f"${x:.2f}")
+        display_df['Fees ($)'] = display_df['Fees ($)'].apply(lambda x: f"${x:.2f}")
+        display_df['Net Margin ($)'] = display_df['Net Margin ($)'].apply(lambda x: f"${x:.2f}")
+        display_df['Margin (%)'] = display_df['Margin (%)'].apply(lambda x: f"{x:.1f}%")
+        
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        
+        # Warnings for unprofitable products
+        unprofitable_products = product_profitability[product_profitability['Net_Margin'] < 0]
+        if len(unprofitable_products) > 0:
+            st.markdown("### ⚠️ Action Required")
+            st.error(f"🚨 {len(unprofitable_products)} product(s) are losing money!")
+            
+            for _, row in unprofitable_products.iterrows():
+                st.markdown(f"""
+                <div class="warning-box">
+                <strong>{row['Product']}</strong><br>
+                Loss: ${abs(row['Net_Margin']):.2f} | {row['Units_Sold']} units sold<br>
+                <em>Action: Increase price or discontinue</em>
+                </div>
+                """, unsafe_allow_html=True)
+    else:
+        st.info("ℹ️ Product profitability data not available")
+
 # ==================== FOOTER ====================
 st.markdown("---")
 col1, col2, col3 = st.columns(3)
@@ -651,7 +915,7 @@ with col3:
 
 st.markdown("""
 <div style='text-align: center; color: #666; padding: 20px; margin-top: 2rem;'>
-    <p><strong>Etsy Dashboard</strong> - Finance Pro v3.0</p>
-    <p style='font-size: 0.9em;'>Advanced financial analytics for Etsy sellers</p>
+    <p><strong>Etsy Dashboard</strong> - Finance Pro v3.1 Enriched</p>
+    <p style='font-size: 0.9em;'>Real profitability tracking with actual Etsy fees</p>
 </div>
 """, unsafe_allow_html=True)
