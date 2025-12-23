@@ -372,7 +372,7 @@ st.markdown("""
         <p class="hero-subtitle">Finance, SEO & Customer Intelligence - All Your Etsy Data in One Beautiful Dashboard</p>
         <div>
             <a href="/auth" class="hero-cta">Start Free Analysis</a>
-            <a href="/calculate-etsy-fees" class="hero-cta secondary">Try Fee Calculator</a>
+            <a href="/calculate_fees" class="hero-cta secondary">Try Fee Calculator</a>
         </div>
         <p style='margin-top: 2rem; font-size: 1rem; opacity: 0.9;'>
             ✅ 100% Free • No Credit Card Required • 3 Complete Dashboards
